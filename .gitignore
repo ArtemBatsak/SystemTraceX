@@ -67,3 +67,25 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.VC.opendb
+*.VC.opendb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio build folders
+ipch/
+*.ipch
+*.aps
+*.VC.db-shm
+*.VC.db-wal
+
+# Visual Studio cache / temp
+x64/
+x86/
+Debug/
+Release/
