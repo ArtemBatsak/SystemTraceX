@@ -79,6 +79,12 @@ namespace Memory{
         return (float)cache.commitUsed * 100.0f /
             (float)cache.commitLimit;
     }
+
+    MemorySnapshot GetSnapshot()
+    {
+        Update();
+        return cache;
+    }
 }
 #endif
 
@@ -147,6 +153,17 @@ namespace Memory
             return 0.0f;
 
         return (float)GetUsedSwap() * 100.0f / (float)total;
+    }
+
+    MemorySnapshot GetSnapshot()
+    {
+        MemorySnapshot snapshot;
+        snapshot.totalRAM = GetTotalRAM();
+        snapshot.freeRAM = GetFreeRAM();
+        snapshot.usedRAM = snapshot.totalRAM - snapshot.freeRAM;
+        snapshot.commitLimit = GetTotalSwap();
+        snapshot.commitUsed = GetUsedSwap();
+        return snapshot;
     }
 }
 #endif

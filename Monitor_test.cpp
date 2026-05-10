@@ -28,73 +28,49 @@ auto MeasureMs(const char* name, Func&& fn)
 int main()
 {
     // ================= CPU =================
-    std::cout << "CPU: "
-        << MeasureMs("CPU::GetCpuModel", []() { return CPU::GetCpuModel(); })
-        << "\n";
+    const auto cpuModel =
+        MeasureMs("CPU::GetCpuModel", []() { return CPU::GetCpuModel(); });
+    const auto cpuCoreCount =
+        MeasureMs("CPU::GetCoreCount", []() { return CPU::GetCoreCount(); });
+    const auto cpuSnapshot =
+        MeasureMs("CPU::GetSnapshot", []() { return CPU::GetSnapshot(); });
 
-    std::cout << "Cores: "
-        << MeasureMs("CPU::GetCoreCount", []() { return CPU::GetCoreCount(); })
-        << "\n";
+    std::cout << "CPU: " << cpuModel << "\n";
+    std::cout << "Cores: " << cpuCoreCount << "\n";
+    std::cout << "Usage: " << cpuSnapshot.totalUsage << "%\n";
 
-    std::cout << "Usage: "
-        << MeasureMs("CPU::GetUsage", []() { return CPU::GetUsage(); })
-        << "%\n";
-
-    auto core = MeasureMs("CPU::GetPerCoreUsage",
-        []() { return CPU::GetPerCoreUsage(); });
-
-    for (size_t i = 0; i < core.size(); i++)
-        std::cout << "Core " << i << ": " << core[i] << "%\n";
+    for (size_t i = 0; i < cpuSnapshot.perCoreUsage.size(); i++)
+        std::cout << "Core " << i << ": " << cpuSnapshot.perCoreUsage[i] << "%\n";
 
     std::cout << "-----------------------------\n";
 
     // ================= RAM =================
-    auto usedRam = MeasureMs("Memory::GetUsedRAM", []() { return Memory::GetUsedRAM(); });
-    auto totalRam = MeasureMs("Memory::GetTotalRAM", []() { return Memory::GetTotalRAM(); });
+    const auto memorySnapshot =
+        MeasureMs("Memory::GetSnapshot", []() { return Memory::GetSnapshot(); });
 
     std::cout << "RAM: "
-        << usedRam / (1024 * 1024) << " MB / "
-        << totalRam / (1024 * 1024) << " MB\n";
-
-    auto usedSwap = MeasureMs("Memory::GetUsedSwap", []() { return Memory::GetUsedSwap(); });
-    auto totalSwap = MeasureMs("Memory::GetTotalSwap", []() { return Memory::GetTotalSwap(); });
+        << memorySnapshot.usedRAM / (1024 * 1024) << " MB / "
+        << memorySnapshot.totalRAM / (1024 * 1024) << " MB\n";
 
     std::cout << "Swap: "
-        << usedSwap / (1024 * 1024) << " MB / "
-        << totalSwap / (1024 * 1024) << " MB\n";
+        << memorySnapshot.commitUsed / (1024 * 1024) << " MB / "
+        << memorySnapshot.commitLimit / (1024 * 1024) << " MB\n";
 
     std::cout << "=============================\n\n";
 
     // ================= SYSTEM INFO =================
-    std::cout << "System: "
-        << MeasureMs("SystemInfo::GetOSName", []() { return SystemInfo::GetOSName(); })
-        << " "
-        << MeasureMs("SystemInfo::GetKernelVersion", []() { return SystemInfo::GetKernelVersion(); })
-        << "\n";
+    const auto systemSnapshot =
+        MeasureMs("SystemInfo::GetSnapshot", []() { return SystemInfo::GetSnapshot(); });
 
-    std::cout << "Hostname: "
-        << MeasureMs("SystemInfo::GetHostname", []() { return SystemInfo::GetHostname(); })
-        << "\n";
+    std::cout << "System: " << systemSnapshot.osName << " " << systemSnapshot.kernelVersion << "\n";
+    std::cout << "Hostname: " << systemSnapshot.hostname << "\n";
+    std::cout << "CPU Name: " << systemSnapshot.cpuName << "\n";
+    std::cout << "Uptime: " << systemSnapshot.uptimeSeconds << " seconds\n";
 
-    std::cout << "CPU Name: "
-        << MeasureMs("SystemInfo::GetCPUName", []() { return SystemInfo::GetCPUName(); })
-        << "\n";
-
-    std::cout << "Uptime: "
-        << MeasureMs("SystemInfo::GetUptimeSeconds", []() { return SystemInfo::GetUptimeSeconds(); })
-        << " seconds\n";
-
-    auto vm = MeasureMs("SystemInfo::GetVirtualizationInfo",
-        []() { return SystemInfo::GetVirtualizationInfo(); });
-
-    std::cout << "Hypervisor: " << (vm.hypervisorPresent ? "Yes" : "No") << "\n";
-    std::cout << "Vendor: " << vm.vendor << "\n";
-    std::cout << "Running in VM: " << (vm.runningInVM ? "Yes" : "No") << "\n";
-
-    std::cout << "Architecture: "
-        << MeasureMs("SystemInfo::GetArchitecture",
-            []() { return SystemInfo::GetArchitecture(); })
-        << "\n";
+    std::cout << "Hypervisor: " << (systemSnapshot.virtualization.hypervisorPresent ? "Yes" : "No") << "\n";
+    std::cout << "Vendor: " << systemSnapshot.virtualization.vendor << "\n";
+    std::cout << "Running in VM: " << (systemSnapshot.virtualization.runningInVM ? "Yes" : "No") << "\n";
+    std::cout << "Architecture: " << systemSnapshot.architecture << "\n";
 
     std::cout << "-----------------------------\n";
 

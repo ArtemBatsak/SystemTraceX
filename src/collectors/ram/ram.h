@@ -26,5 +26,7 @@ namespace Memory
     uint64_t GetTotalSwap();
     uint64_t GetUsedSwap();
     float GetSwapUsagePercent();
-}
 
+    // Full memory snapshot
+    MemorySnapshot GetSnapshot();
+}
