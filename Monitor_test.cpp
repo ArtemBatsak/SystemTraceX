@@ -27,6 +27,15 @@ auto MeasureMs(const char* name, Func&& fn)
 
 int main()
 {
+	Process::Init();
+
+	Disk::Init();
+
+	SystemErrors::Init();
+
+	Net::Init();
+	
+
     // ================= CPU =================
     const auto cpuModel =
         MeasureMs("CPU::GetCpuModel", []() { return CPU::GetCpuModel(); });
@@ -147,7 +156,7 @@ int main()
 
     std::cout << "=============================\n";
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50000));
 
     return 0;
 }

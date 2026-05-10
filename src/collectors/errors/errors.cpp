@@ -42,6 +42,7 @@ namespace SystemErrors
 
     ErrorSnapshot GetSnapshot()
     {
+        Update();
         return cache;
     }
 

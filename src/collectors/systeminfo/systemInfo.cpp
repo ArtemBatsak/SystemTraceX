@@ -199,6 +199,7 @@ namespace SystemInfo
 
     SystemSnapshot GetSnapshot()
     {
+        Update();
         SystemSnapshot snapshot;
         snapshot.osName = GetOSName();
         snapshot.kernelVersion = GetKernelVersion();

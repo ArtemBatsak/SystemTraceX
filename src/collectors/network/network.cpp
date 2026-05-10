@@ -107,6 +107,7 @@ namespace Net
 
     NetworkSnapshot GetSnapshot()
     {
+        Update();
         std::lock_guard<std::mutex> lock(mtx);
         return cache;
     }

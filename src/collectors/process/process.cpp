@@ -248,6 +248,7 @@ namespace Process
     // =========================
     ProcessSnapshot GetSnapshot()
     {
+        Update();
         std::lock_guard<std::mutex> lock(mtx);
         return cache;
     }

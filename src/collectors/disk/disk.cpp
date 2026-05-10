@@ -97,6 +97,7 @@ namespace Disk
 
     DiskSystemSnapshot GetSnapshot()
     {
+        Update();
         std::lock_guard<std::mutex> lock(mtx);
         return cache;
     }
