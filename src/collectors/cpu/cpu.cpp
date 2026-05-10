@@ -129,6 +129,12 @@ namespace CPU
         Update();
         return cache.perCoreUsage;
     }
+
+    CpuSnapshot GetSnapshot()
+    {
+        Update();
+        return cache;
+    }
 }
 #endif
 
@@ -282,6 +288,12 @@ namespace CPU
     {
         Update();
         return cache.perCoreUsage;
+    }
+
+    CpuSnapshot GetSnapshot()
+    {
+        Update();
+        return cache;
     }
 }
 #endif

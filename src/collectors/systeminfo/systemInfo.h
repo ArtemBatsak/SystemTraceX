@@ -13,6 +13,17 @@ namespace SystemInfo
         std::string vendor = "None";
     };
 
+    struct SystemSnapshot
+    {
+        std::string osName;
+        std::string kernelVersion;
+        std::string hostname;
+        std::string cpuName;
+        uint64_t uptimeSeconds = 0;
+        std::string architecture;
+        VirtualizationInfo virtualization;
+    };
+
     std::string GetOSName();
     std::string GetKernelVersion();
     std::string GetHostname();
@@ -22,4 +33,5 @@ namespace SystemInfo
     std::string GetArchitecture();
 
     VirtualizationInfo GetVirtualizationInfo();
+    SystemSnapshot GetSnapshot();
 }

@@ -26,4 +26,7 @@ namespace CPU {
     // Usage per core (%)
     std::vector<float> GetPerCoreUsage();
 
+    // Full CPU snapshot
+    CpuSnapshot GetSnapshot();
+
 }

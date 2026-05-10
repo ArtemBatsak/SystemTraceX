@@ -196,6 +196,19 @@ namespace SystemInfo
 
         return info;
     }
+
+    SystemSnapshot GetSnapshot()
+    {
+        SystemSnapshot snapshot;
+        snapshot.osName = GetOSName();
+        snapshot.kernelVersion = GetKernelVersion();
+        snapshot.hostname = GetHostname();
+        snapshot.cpuName = GetCPUName();
+        snapshot.uptimeSeconds = GetUptimeSeconds();
+        snapshot.architecture = GetArchitecture();
+        snapshot.virtualization = GetVirtualizationInfo();
+        return snapshot;
+    }
 }
 
 #endif
@@ -413,6 +426,19 @@ namespace SystemInfo
         }
 
         return info;
+    }
+
+    SystemSnapshot GetSnapshot()
+    {
+        SystemSnapshot snapshot;
+        snapshot.osName = GetOSName();
+        snapshot.kernelVersion = GetKernelVersion();
+        snapshot.hostname = GetHostname();
+        snapshot.cpuName = GetCPUName();
+        snapshot.uptimeSeconds = GetUptimeSeconds();
+        snapshot.architecture = GetArchitecture();
+        snapshot.virtualization = GetVirtualizationInfo();
+        return snapshot;
     }
 }
 
