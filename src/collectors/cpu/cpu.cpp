@@ -1,143 +1,5 @@
 #include "cpu.h"
 
-#ifdef __linux__
-#include <chrono>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <thread>
-#include <unistd.h>
-
-namespace fs = std::filesystem;
-
-namespace CPU
-{
-    static CpuSnapshot cache;
-    static std::chrono::steady_clock::time_point lastUpdate;
-    static const int updateIntervalMs = 500;
-
-    std::string GetCpuModel()
-    {
-        std::ifstream file("/proc/cpuinfo");
-        std::string line;
-
-        while (std::getline(file, line))
-        {
-            if (line.find("model name") != std::string::npos)
-            {
-                return line.substr(line.find(":") + 2);
-            }
-        }
-
-        return "Unknown";
-    }
-
-    void Update()
-    {
-        auto now = std::chrono::steady_clock::now();
-
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - lastUpdate).count() < updateIntervalMs)
-        {
-            return;
-        }
-
-        struct CoreData
-        {
-            uint64_t idle = 0;
-            uint64_t total = 0;
-        };
-
-        auto ReadStats = []()
-        {
-            std::ifstream file("/proc/stat");
-            std::string line;
-            std::vector<CoreData> data;
-
-            while (std::getline(file, line))
-            {
-                if (line.rfind("cpu", 0) != 0)
-                    continue;
-
-                std::istringstream ss(line);
-
-                std::string cpu;
-                uint64_t user = 0, nice = 0, system = 0, idle = 0;
-                uint64_t iowait = 0, irq = 0, softirq = 0, steal = 0;
-
-                ss >> cpu >> user >> nice >> system >> idle
-                    >> iowait >> irq >> softirq >> steal;
-
-                uint64_t total =
-                    user + nice + system + idle +
-                    iowait + irq + softirq + steal;
-
-                data.push_back({ idle, total });
-            }
-
-            return data;
-        };
-
-        auto first = ReadStats();
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        auto second = ReadStats();
-
-        if (first.empty() || second.empty())
-        {
-            cache.totalUsage = 0.0f;
-            cache.perCoreUsage.clear();
-            return;
-        }
-
-        uint64_t idleDiffTotal = second[0].idle - first[0].idle;
-        uint64_t totalDiffTotal = second[0].total - first[0].total;
-
-        cache.totalUsage = (totalDiffTotal == 0)
-            ? 0.0f
-            : 100.0f * (1.0f - (float)idleDiffTotal / (float)totalDiffTotal);
-
-        cache.perCoreUsage.clear();
-
-        for (size_t i = 1; i < first.size() && i < second.size(); ++i)
-        {
-            uint64_t idleDiff = second[i].idle - first[i].idle;
-            uint64_t totalDiff = second[i].total - first[i].total;
-
-            float usage = (totalDiff == 0)
-                ? 0.0f
-                : 100.0f * (1.0f - (float)idleDiff / (float)totalDiff);
-
-            cache.perCoreUsage.push_back(usage);
-        }
-
-        lastUpdate = now;
-    }
-
-    float GetUsage()
-    {
-        Update();
-        return cache.totalUsage;
-    }
-
-    int GetCoreCount()
-    {
-        return sysconf(_SC_NPROCESSORS_ONLN);
-    }
-
-    std::vector<float> GetPerCoreUsage()
-    {
-        Update();
-        return cache.perCoreUsage;
-    }
-
-    CpuSnapshot GetSnapshot()
-    {
-        Update();
-        return cache;
-    }
-}
-#endif
-
 #ifdef _WIN32
 
 #define WIN32_LEAN_AND_MEAN
@@ -153,147 +15,175 @@ namespace CPU
 
 #pragma comment(lib, "PowrProf.lib")
 
-namespace CPU
-{
-    static CpuSnapshot cache;
-    static std::chrono::steady_clock::time_point lastUpdate;
-    static const int updateIntervalMs = 500;
+#include <mutex>
 
-    std::string GetCpuModel()
-    {
-        HKEY hKey;
+#pragma comment(lib, "pdh.lib")
 
-        const char* path =
-            "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0";
+namespace CPU {
 
+	// Static variables for PDH query and counters
+    static PDH_HQUERY hQuery = nullptr;
+    static PDH_HCOUNTER hTotalCounter;
+    static std::vector<PDH_HCOUNTER> coreCounters;
+    static CpuSnapshot currentCache;
+    static std::mutex cacheMutex;
+
+	// Helper function to fetch CPU model name from registry (work only 1 time, during initialization)
+    std::string FetchCpuModel() {
         char buffer[256];
         DWORD size = sizeof(buffer);
-
-        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, path, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
-        {
-            if (RegQueryValueExA(hKey, "ProcessorNameString", nullptr, nullptr,
-                (LPBYTE)buffer, &size) == ERROR_SUCCESS)
-            {
-                RegCloseKey(hKey);
-                return std::string(buffer);
-            }
-
+        HKEY hKey;
+        if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            RegQueryValueExA(hKey, "ProcessorNameString", nullptr, nullptr, (LPBYTE)buffer, &size);
             RegCloseKey(hKey);
+            return std::string(buffer);
         }
-
         return "Unknown CPU";
     }
 
-    void Update()
-    {
-        auto now = std::chrono::steady_clock::now();
+    void Init() {
+        if (hQuery) return; 
 
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - lastUpdate).count() < updateIntervalMs)
-        {
-            return;
-        }
+        PdhOpenQueryW(NULL, 0, &hQuery);
 
-        FILETIME idle1, kernel1, user1;
-        FILETIME idle2, kernel2, user2;
+		// Counter for total CPU usage
+        PdhAddEnglishCounterW(hQuery, L"\\Processor(_Total)\\% Processor Time", 0, &hTotalCounter);
 
-        auto ToUint64 = [](FILETIME ft)
-            {
-                return ((uint64_t)ft.dwHighDateTime << 32)
-                    | ft.dwLowDateTime;
-            };
-
-        GetSystemTimes(&idle1, &kernel1, &user1);
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        GetSystemTimes(&idle2, &kernel2, &user2);
-
-        uint64_t idle = ToUint64(idle2) - ToUint64(idle1);
-        uint64_t kernel = ToUint64(kernel2) - ToUint64(kernel1);
-        uint64_t user = ToUint64(user2) - ToUint64(user1);
-        uint64_t total = kernel + user;
-
-        cache.totalUsage = (total == 0)
-            ? 0.0f
-            : 100.0f * (1.0f - ((float)idle / (float)total));
-
-        cache.perCoreUsage.clear();
-
+		// Counters for per-core usage
         SYSTEM_INFO sysInfo;
         GetSystemInfo(&sysInfo);
+        currentCache.coreCount = sysInfo.dwNumberOfProcessors;
+        currentCache.cpuname = FetchCpuModel();
+        coreCounters.resize(currentCache.coreCount);
+        currentCache.perCoreUsage.resize(currentCache.coreCount);
 
-        DWORD coreCount = sysInfo.dwNumberOfProcessors;
-
-        std::vector<PDH_HQUERY> q(coreCount);
-        std::vector<PDH_HCOUNTER> c(coreCount);
-
-        for (DWORD i = 0; i < coreCount; i++)
-        {
-            std::wstring path =
-                L"\\Processor(" + std::to_wstring(i) + L")\\% Processor Time";
-
-            PdhOpenQuery(NULL, 0, &q[i]);
-
-            PdhAddEnglishCounterW(
-                q[i],
-                path.c_str(),
-                0,
-                &c[i]
-            );
-
-            PdhCollectQueryData(q[i]);
+        for (int i = 0; i < currentCache.coreCount; i++) {
+            std::wstring path = L"\\Processor(" + std::to_wstring(i) + L")\\% Processor Time";
+            PdhAddEnglishCounterW(hQuery, path.c_str(), 0, &coreCounters[i]);
         }
 
-        Sleep(500);
+		// First data collection to initialize counters
+        PdhCollectQueryData(hQuery);
+    }
 
-        for (DWORD i = 0; i < coreCount; i++)
-        {
-            PdhCollectQueryData(q[i]);
+    void Update() {
+        if (!hQuery) Init();
 
-            PDH_FMT_COUNTERVALUE value;
+        if (PdhCollectQueryData(hQuery) == ERROR_SUCCESS) {
+            std::lock_guard<std::mutex> lock(cacheMutex);
 
-            PdhGetFormattedCounterValue(
-                c[i],
-                PDH_FMT_DOUBLE,
-                NULL,
-                &value
-            );
+            PDH_FMT_COUNTERVALUE val;
 
-            cache.perCoreUsage.push_back((float)value.doubleValue);
+			// Read total CPU usage
+            PdhGetFormattedCounterValue(hTotalCounter, PDH_FMT_DOUBLE, NULL, &val);
+            currentCache.totalUsage = (float)val.doubleValue;
+
+			// Read per-core CPU usage
+            for (int i = 0; i < currentCache.coreCount; i++) {
+                PdhGetFormattedCounterValue(coreCounters[i], PDH_FMT_DOUBLE, NULL, &val);
+                currentCache.perCoreUsage[i] = (float)val.doubleValue;
+            }
         }
+    }
 
-        for (DWORD i = 0; i < coreCount; i++)
-        {
-            PdhCloseQuery(q[i]);
+    CpuSnapshot GetSnapshot() {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        return currentCache; 
+    }
+}
+#endif
+
+#ifdef __linux__
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <string>
+#include <mutex>
+#include <algorithm>
+
+namespace CPU {
+
+    struct CpuTime {
+        long long user, nice, system, idle, iowait, irq, softirq, steal;
+        long long Total() const {
+            return user + nice + system + idle + iowait + irq + softirq + steal;
         }
+        long long Active() const {
+            return user + nice + system + irq + softirq + steal;
+        }
+    };
 
-        lastUpdate = now;
+    static CpuSnapshot currentCache;
+    static std::vector<CpuTime> lastTimes; // Для хранения предыдущего замера
+    static std::mutex cacheMutex;
+
+    // Чтение имени процессора
+    std::string FetchCpuModel() {
+        std::ifstream file("/proc/cpuinfo");
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.find("model name") != std::string::npos) {
+                return line.substr(line.find(":") + 2);
+            }
+        }
+        return "Unknown CPU";
     }
 
-    float GetUsage()
-    {
-        Update();
-        return cache.totalUsage;
+	// Read CPU times from /proc/stat
+    std::vector<CpuTime> ReadCpuTimes() {
+        std::vector<CpuTime> times;
+        std::ifstream file("/proc/stat");
+        std::string line, label;
+
+        while (std::getline(file, line)) {
+			if (line.compare(0, 3, "cpu") == 0) { // Look for lines starting with "cpu"
+                std::stringstream ss(line);
+                ss >> label; 
+
+                CpuTime t;
+                ss >> t.user >> t.nice >> t.system >> t.idle >> t.iowait >> t.irq >> t.softirq >> t.steal;
+                times.push_back(t);
+            }
+            else break;
+        }
+        return times;
     }
 
-    int GetCoreCount()
-    {
-        SYSTEM_INFO sysInfo;
-
-        GetSystemInfo(&sysInfo);
-
-        return sysInfo.dwNumberOfProcessors;
+    void Init() {
+        currentCache.cpuname = FetchCpuModel();
+		lastTimes = ReadCpuTimes(); // First read to initialize
+		currentCache.coreCount = lastTimes.size() - 1; // -1 because the first entry is total
+        currentCache.perCoreUsage.resize(currentCache.coreCount);
     }
 
-    std::vector<float> GetPerCoreUsage()
-    {
-        Update();
-        return cache.perCoreUsage;
+    void Update() {
+        if (lastTimes.empty()) Init();
+
+        auto newTimes = ReadCpuTimes();
+        if (newTimes.size() != lastTimes.size()) return;
+
+        std::lock_guard<std::mutex> lock(cacheMutex);
+
+        for (size_t i = 0; i < newTimes.size(); ++i) {
+            long long totalDiff = newTimes[i].Total() - lastTimes[i].Total();
+            long long activeDiff = newTimes[i].Active() - lastTimes[i].Active();
+
+            float usage = (totalDiff == 0) ? 0.0f : (100.0f * activeDiff / totalDiff);
+
+            if (i == 0) {
+                currentCache.totalUsage = usage; // Общая нагрузка
+            }
+            else {
+                currentCache.perCoreUsage[i - 1] = usage; // Нагрузка по ядрам
+            }
+        }
+        lastTimes = std::move(newTimes);
     }
 
-    CpuSnapshot GetSnapshot()
-    {
-        Update();
-        return cache;
+    CpuSnapshot GetSnapshot() {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        return currentCache;
     }
 }
 #endif

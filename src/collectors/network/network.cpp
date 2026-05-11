@@ -159,21 +159,30 @@ namespace Net
 
         while (std::getline(file, line))
         {
-            if (line.find(":") == std::string::npos)
+            if (line.find(':') == std::string::npos)
                 continue;
 
             std::istringstream ss(line);
 
             std::string iface;
-            ss >> iface;
-            iface.pop_back();
+            std::getline(ss, iface, ':');
 
-            LinuxIface i;
+          
+            iface.erase(0, iface.find_first_not_of(" \t"));
+            iface.erase(iface.find_last_not_of(" \t") + 1);
+
+            LinuxIface i{};
             i.name = iface;
 
+            // RX bytes
             ss >> i.rxBytes;
-            for (int k = 0; k < 7; k++) ss >> std::ws >> std::string();
 
+            
+            uint64_t skip;
+            for (int k = 0; k < 7; k++)
+                ss >> skip;
+
+            // TX bytes
             ss >> i.txBytes;
 
             current[iface] = i;

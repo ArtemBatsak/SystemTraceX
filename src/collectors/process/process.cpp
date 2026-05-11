@@ -5,24 +5,6 @@
 #include <unordered_map>
 #include <chrono>
 
-#ifdef _WIN32
-
-#include <windows.h>
-#include <psapi.h>
-#include <tlhelp32.h>
-#pragma comment(lib, "psapi.lib")
-
-#endif
-
-#ifdef __linux__
-
-#include <dirent.h>
-#include <fstream>
-#include <sstream>
-#include <unistd.h>
-
-#endif
-
 namespace Process
 {
     static ProcessSnapshot cache;
@@ -38,43 +20,25 @@ namespace Process
     static std::unordered_map<uint32_t, RawProcess> prev;
     static std::chrono::steady_clock::time_point lastUpdateTs;
 
-#ifdef __linux__
-    static uint64_t ReadTotalCpuJiffies()
-    {
-        std::ifstream file("/proc/stat");
-        std::string cpu;
-        uint64_t user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0;
-        file >> cpu >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
-        return user + nice + system + idle + iowait + irq + softirq + steal;
-    }
+    // ============================================================================
+// WINDOWS IMPLEMENTATION
+// ============================================================================
+#ifdef _WIN32
 
-    static uint64_t GetProcessCpuTime(int pid)
-    {
-        std::ifstream f("/proc/" + std::to_string(pid) + "/stat");
-        std::string line;
-        std::getline(f, line);
-        if (line.empty()) return 0;
-
-        std::istringstream ss(line);
-        std::string tmp;
-        for (int i = 0; i < 13; i++) ss >> tmp;
-
-        uint64_t utime = 0, stime = 0;
-        ss >> utime >> stime;
-
-        return utime + stime;
-    }
-#endif
+#include <windows.h>
+#include <psapi.h>
+#include <tlhelp32.h>
+#include <thread>
+#pragma comment(lib, "psapi.lib")
 
     void Update()
     {
         std::vector<ProcessInfo> processes;
-
-#ifdef _WIN32
+        
         DWORD pids[4096], needed;
         if (!EnumProcesses(pids, sizeof(pids), &needed)) return;
 
-        const int cpuCount = std::max(1u, std::thread::hardware_concurrency());
+        const int cpuCount = std::thread::hardware_concurrency();
         FILETIME idleTime, kernelTime, userTime;
         GetSystemTimes(&idleTime, &kernelTime, &userTime);
         ULARGE_INTEGER k, u;
@@ -124,9 +88,73 @@ namespace Process
             CloseHandle(h);
             processes.push_back(p);
         }
-#endif
 
+        ProcessSnapshot snap;
+        snap.processCount = static_cast<uint32_t>(processes.size());
+
+        auto byCpu = processes;
+        auto byMem = processes;
+        auto byDisk = processes;
+
+        std::sort(byCpu.begin(), byCpu.end(), [](const auto& a, const auto& b) { return a.cpuUsage > b.cpuUsage; });
+        std::sort(byMem.begin(), byMem.end(), [](const auto& a, const auto& b) { return a.memoryBytes > b.memoryBytes; });
+        std::sort(byDisk.begin(), byDisk.end(), [](const auto& a, const auto& b) {
+            return (a.diskReadBytes + a.diskWriteBytes) > (b.diskReadBytes + b.diskWriteBytes);
+        });
+
+        size_t limit = std::min<size_t>(10, processes.size());
+        snap.topCpu.assign(byCpu.begin(), byCpu.begin() + limit);
+        snap.topMemory.assign(byMem.begin(), byMem.begin() + limit);
+        snap.topDisk.assign(byDisk.begin(), byDisk.begin() + limit);
+        snap.allProcesses = std::move(processes);
+
+        std::lock_guard<std::mutex> lock(mtx);
+        cache = std::move(snap);
+    }
+
+#endif // _WIN32
+
+// ============================================================================
+// LINUX IMPLEMENTATION
+// ============================================================================
 #ifdef __linux__
+
+#include <dirent.h>
+#include <fstream>
+#include <sstream>
+#include <unistd.h>
+#include <thread>
+
+    static uint64_t ReadTotalCpuJiffies()
+    {
+        std::ifstream file("/proc/stat");
+        std::string cpu;
+        uint64_t user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0;
+        file >> cpu >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
+        return user + nice + system + idle + iowait + irq + softirq + steal;
+    }
+
+    static uint64_t GetProcessCpuTime(int pid)
+    {
+        std::ifstream f("/proc/" + std::to_string(pid) + "/stat");
+        std::string line;
+        std::getline(f, line);
+        if (line.empty()) return 0;
+
+        std::istringstream ss(line);
+        std::string tmp;
+        for (int i = 0; i < 13; i++) ss >> tmp;
+
+        uint64_t utime = 0, stime = 0;
+        ss >> utime >> stime;
+
+        return utime + stime;
+    }
+
+    void Update()
+    {
+        std::vector<ProcessInfo> processes;
+        
         const uint64_t totalCpuNow = ReadTotalCpuJiffies();
         static uint64_t totalCpuPrev = 0;
         const uint64_t totalCpuDiff = (totalCpuPrev == 0 || totalCpuNow <= totalCpuPrev) ? 0 : (totalCpuNow - totalCpuPrev);
@@ -188,7 +216,6 @@ namespace Process
         }
 
         closedir(dir);
-#endif
 
         ProcessSnapshot snap;
         snap.processCount = static_cast<uint32_t>(processes.size());
@@ -212,6 +239,12 @@ namespace Process
         std::lock_guard<std::mutex> lock(mtx);
         cache = std::move(snap);
     }
+
+#endif // __linux__
+
+// ============================================================================
+// COMMON INTERFACE
+// ============================================================================
 
     ProcessSnapshot GetSnapshot()
     {

@@ -2,88 +2,22 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <chrono>
 namespace Memory{
 
-    static MemorySnapshot cache;
+    MemorySnapshot GetSnapshot() {
+        MEMORYSTATUSEX memInfo;
+        memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+        GlobalMemoryStatusEx(&memInfo);
 
-    static std::chrono::steady_clock::time_point lastUpdate;
-    static const int updateIntervalMs = 500;
+        MemorySnapshot snap;
+        snap.totalRAM = memInfo.ullTotalPhys;
+        snap.freeRAM = memInfo.ullAvailPhys;
+        snap.usedRAM = snap.totalRAM - snap.freeRAM;
 
-    void Update()
-    {
-        auto now = std::chrono::steady_clock::now();
+        snap.commitLimit = memInfo.ullTotalPageFile;
+        snap.commitUsed = memInfo.ullTotalPageFile - memInfo.ullAvailPageFile;
 
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(
-            now - lastUpdate).count() < updateIntervalMs)
-        {
-            return;
-        }
-
-        MEMORYSTATUSEX state;
-        state.dwLength = sizeof(state);
-
-        GlobalMemoryStatusEx(&state);
-
-        cache.totalRAM = state.ullTotalPhys;
-        cache.freeRAM = state.ullAvailPhys;
-        cache.usedRAM = state.ullTotalPhys - state.ullAvailPhys;
-
-        cache.commitLimit = state.ullTotalPageFile;
-        cache.commitUsed = state.ullTotalPageFile - state.ullAvailPageFile;
-
-        lastUpdate = now;
-    }
-
-    // ---------------- RAM ----------------
-
-    uint64_t GetTotalRAM()
-    {
-        Update();
-        return cache.totalRAM;
-    }
-
-    uint64_t GetUsedRAM()
-    {
-        Update();
-        return cache.usedRAM;
-    }
-
-    uint64_t GetFreeRAM()
-    {
-        Update();
-        return cache.freeRAM;
-    }
-
-    // ---------------- Swap (Commit) ----------------
-
-    uint64_t GetTotalSwap()
-    {
-        Update();
-        return cache.commitLimit;
-    }
-
-    uint64_t GetUsedSwap()
-    {
-        Update();
-        return cache.commitUsed;
-    }
-
-    float GetSwapUsagePercent()
-    {
-        Update();
-
-        if (cache.commitLimit == 0)
-            return 0.0f;
-
-        return (float)cache.commitUsed * 100.0f /
-            (float)cache.commitLimit;
-    }
-
-    MemorySnapshot GetSnapshot()
-    {
-        Update();
-        return cache;
+        return snap;
     }
 }
 #endif
@@ -91,79 +25,35 @@ namespace Memory{
 #ifdef __linux__
 #include <fstream>
 #include <string>
+#include <sstream>
 
 namespace Memory
 {
-    static uint64_t ReadMemValue(const std::string& key)
-    {
+    MemorySnapshot GetSnapshot() {
+        MemorySnapshot snap;
         std::ifstream file("/proc/meminfo");
         std::string line;
 
-        while (std::getline(file, line))
-        {
-            if (line.find(key) != std::string::npos)
-            {
-                size_t pos = line.find(":");
-                std::string value = line.substr(pos + 1);
+        uint64_t memFree = 0, buffers = 0, cached = 0, swapTotal = 0, swapFree = 0;
 
-                return std::stoull(value) * 1024; // KB -> bytes
-            }
+        while (std::getline(file, line)) {
+            std::stringstream ss(line);
+            std::string key;
+            uint64_t value;
+			ss >> key >> value; // Value is in KB
+
+            if (key == "MemTotal:")     snap.totalRAM = value * 1024;
+            else if (key == "MemAvailable:") snap.freeRAM = value * 1024;
+            else if (key == "SwapTotal:")    swapTotal = value * 1024;
+            else if (key == "SwapFree:")     swapFree = value * 1024;
         }
 
-        return 0;
+        snap.usedRAM = snap.totalRAM - snap.freeRAM;
+        snap.commitLimit = snap.totalRAM + swapTotal;
+        snap.commitUsed = snap.usedRAM + (swapTotal - swapFree);
+
+        return snap;
     }
-
-    // ---------------- RAM ----------------
-
-    uint64_t GetTotalRAM()
-    {
-        return ReadMemValue("MemTotal");
-    }
-
-    uint64_t GetFreeRAM()
-    {
-        return ReadMemValue("MemAvailable");
-    }
-
-    uint64_t GetUsedRAM()
-    {
-        return GetTotalRAM() - GetFreeRAM();
-    }
-
-    // ---------------- SWAP ----------------
-
-    uint64_t GetTotalSwap()
-    {
-        return ReadMemValue("SwapTotal");
-    }
-
-    uint64_t GetUsedSwap()
-    {
-        uint64_t total = ReadMemValue("SwapTotal");
-        uint64_t free = ReadMemValue("SwapFree");
-
-        return total - free;
-    }
-
-    float GetSwapUsagePercent()
-    {
-        uint64_t total = GetTotalSwap();
-
-        if (total == 0)
-            return 0.0f;
-
-        return (float)GetUsedSwap() * 100.0f / (float)total;
-    }
-
-    MemorySnapshot GetSnapshot()
-    {
-        MemorySnapshot snapshot;
-        snapshot.totalRAM = GetTotalRAM();
-        snapshot.freeRAM = GetFreeRAM();
-        snapshot.usedRAM = snapshot.totalRAM - snapshot.freeRAM;
-        snapshot.commitLimit = GetTotalSwap();
-        snapshot.commitUsed = GetUsedSwap();
-        return snapshot;
-    }
+    
 }
 #endif

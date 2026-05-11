@@ -23,15 +23,13 @@ namespace SystemInfo
         std::string architecture;
         VirtualizationInfo virtualization;
     };
-
-    std::string GetOSName();
-    std::string GetKernelVersion();
-    std::string GetHostname();
-    std::string GetCPUName();
-
-    uint64_t GetUptimeSeconds();
-    std::string GetArchitecture();
-
-    VirtualizationInfo GetVirtualizationInfo();
     SystemSnapshot GetSnapshot();
+
+#ifdef _WIN32
+    static std::string GetPreciseWindowsName();
+    static std::string GetSystemArchitecture();
+#endif
+#ifdef __linux__
+	std::string GetLinuxDistroName();   
+#endif
 }

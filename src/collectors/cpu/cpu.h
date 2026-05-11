@@ -5,28 +5,14 @@
 
 namespace CPU {
 
-    struct CpuSnapshot
-    {
+    struct CpuSnapshot {
         float totalUsage = 0.0f;
         std::vector<float> perCoreUsage;
+        int coreCount = 0;
+        std::string cpuname;
     };
-
-    // Name of the CPU model
-    std::string GetCpuModel();
-
-    // Refresh cached snapshot (contains sleep-based sampling for now)
-    void Update();
-
-    // Total CPU usage (%)
-    float GetUsage();
-
-    // Core count
-    int GetCoreCount();
-
-    // Usage per core (%)
-    std::vector<float> GetPerCoreUsage();
-
-    // Full CPU snapshot
+	void Init();
+	void Update();
     CpuSnapshot GetSnapshot();
 
 }

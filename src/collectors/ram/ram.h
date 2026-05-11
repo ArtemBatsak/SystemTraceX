@@ -14,19 +14,6 @@ namespace Memory
         uint64_t commitUsed = 0;  // "swap used"
     };
 
-    
-    void Update();
-
-    // RAM
-    uint64_t GetTotalRAM();
-    uint64_t GetUsedRAM();
-    uint64_t GetFreeRAM();
-
-    // "Swap" (Commit system)
-    uint64_t GetTotalSwap();
-    uint64_t GetUsedSwap();
-    float GetSwapUsagePercent();
-
     // Full memory snapshot
     MemorySnapshot GetSnapshot();
 }

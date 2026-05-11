@@ -10,11 +10,11 @@ add_executable(SystemTraceX
     src/collectors/ram/ram.cpp
     src/collectors/systeminfo/systemInfo.cpp
     src/collectors/disk/disk.cpp
-    src/collectors/process/process.cpp
-    src/collectors/errors/errors.cpp
-    src/collectors/network/network.cpp
-
- "src/collectors/network/network.h" "src/collectors/network/network.cpp" "src/collectors/disk/disk.h" "src/collectors/disk/disk.cpp" "src/collectors/process/process.h" "src/collectors/process/process.cpp" "src/collectors/errors/errors.cpp" "src/collectors/errors/errors.h")
+    #src/collectors/process/process.cpp
+   # src/collectors/errors/errors.cpp
+    #src/collectors/network/network.cpp
+    "src/collectors/cpu/cpu.h")
+ #"src/collectors/network/network.h" "src/collectors/network/network.cpp" "src/collectors/disk/disk.h" "src/collectors/disk/disk.cpp" "src/collectors/process/process.h" "src/collectors/process/process.cpp" "src/collectors/errors/errors.cpp" "src/collectors/errors/errors.h")
 
 # ---- DEFINES (ВАЖНО: после add_executable)
 target_compile_definitions(SystemTraceX PRIVATE
@@ -29,3 +29,4 @@ if (WIN32)
         PowrProf
     )
 endif()
+
