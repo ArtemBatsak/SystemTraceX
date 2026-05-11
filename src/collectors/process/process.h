@@ -33,7 +33,6 @@ namespace Process
         std::vector<ProcessInfo> allProcesses;
     };
 
-    bool Init();
     void Update();
     ProcessSnapshot GetSnapshot();
 }
