@@ -45,18 +45,17 @@ namespace Disk {
             std::string device, target, type;
             ss >> device >> target >> type;
 
-            // Фильтруем только реальные физические диски
+			// Take only block devices (e.g., /dev/sda1) to avoid counting virtual filesystems
             if (device.compare(0, 5, "/dev/") == 0) {
                 struct statfs s;
                 if (statfs(target.c_str(), &s) == 0) {
                     DiskSnapshot snap;
-                    snap.name = target; // Точка монтирования, например "/"
+                    snap.name = target; 
 
-                    // f_bsize — размер блока, f_blocks — всего блоков
+                    // f_bsize — size of each block, f_blocks — total number of blocks
                     snap.totalBytes = (uint64_t)s.f_blocks * s.f_frsize;
                     snap.freeBytes = (uint64_t)s.f_bavail * s.f_frsize;
 
-                    // Избегаем дубликатов (иногда один диск виден в разных точках)
                     systemSnap.disks.push_back(snap);
                 }
             }
