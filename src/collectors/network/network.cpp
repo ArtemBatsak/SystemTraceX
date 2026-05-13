@@ -4,7 +4,25 @@
 #include <sstream>
 #include <algorithm>
 #include <iostream>
+#include <map>
+namespace Net {
 
+	// Struct to hold previous snapshot data for each interface
+    struct PrevData {
+        uint64_t rx;
+        uint64_t tx;
+        double timestamp;
+    };
+
+	// Static map to hold history of each interface's rx/tx bytes and timestamp
+	// Sructure init one time and then updated on each snapshot retrieval
+    static std::map<std::string, PrevData> g_history;
+
+    static double GetCurrentSeconds() {
+        auto now = std::chrono::steady_clock::now();
+        return std::chrono::duration<double>(now.time_since_epoch()).count();
+    }
+}
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -16,12 +34,7 @@
 
 namespace Net {
 
-    static double GetCurrentSeconds() {
-        auto now = std::chrono::steady_clock::now();
-        return std::chrono::duration<double>(now.time_since_epoch()).count();
-    }
-
-    NetworkSnapshot NetworkCollector::GetSnapshot() {
+    NetworkSnapshot GetSnapshot() {
         NetworkSnapshot snap;
         double currentTime = GetCurrentSeconds();
 
@@ -38,21 +51,19 @@ namespace Net {
         }
 
         if (dwRetVal == NO_ERROR) {
-            // ИСПРАВЛЕНО: Правильный шаг цикла pCurr = pCurr->Next
             for (PIP_ADAPTER_ADDRESSES pCurr = pAddresses; pCurr != nullptr; pCurr = pCurr->Next) {
                 InterfaceSnapshot iface;
 
-                // 1. Имя для вывода (Кириллица)
+                // 1. Имя (UTF-8)
                 int size_needed = WideCharToMultiByte(CP_UTF8, 0, pCurr->FriendlyName, -1, NULL, 0, NULL, NULL);
                 if (size_needed > 0) {
                     iface.name.resize(size_needed - 1);
                     WideCharToMultiByte(CP_UTF8, 0, pCurr->FriendlyName, -1, &iface.name[0], size_needed, NULL, NULL);
                 }
 
-				// Unique ID for history tracking (using AdapterName which is stable and unique)
                 std::string adapterId = pCurr->AdapterName;
 
-				// 2. Ip address 
+                // 2. IP Address
                 for (PIP_ADAPTER_UNICAST_ADDRESS pUnicast = pCurr->FirstUnicastAddress; pUnicast != nullptr; pUnicast = pUnicast->Next) {
                     if (pUnicast->Address.lpSockaddr->sa_family == AF_INET) {
                         char ipStr[INET_ADDRSTRLEN];
@@ -66,7 +77,7 @@ namespace Net {
                 iface.isLoopback = (pCurr->IfType == IF_TYPE_SOFTWARE_LOOPBACK);
                 iface.isUp = (pCurr->OperStatus == IfOperStatusUp);
 
-                // 3. Static 
+                // 3. Статистика
                 MIB_IF_ROW2 row;
                 ZeroMemory(&row, sizeof(row));
                 row.InterfaceLuid = pCurr->Luid;
@@ -75,23 +86,19 @@ namespace Net {
                     iface.rxTotalBytes = row.InOctets;
                     iface.txTotalBytes = row.OutOctets;
 
-                    if (history.count(adapterId)) {
-                        double dt = currentTime - history[adapterId].timestamp;
+                    if (g_history.count(adapterId)) {
+                        double dt = currentTime - g_history[adapterId].timestamp;
                         if (dt > 0.1) {
-							// Use double for diff to prevent overflow issues on high-traffic interfaces
-                            double rxDiff = static_cast<double>(iface.rxTotalBytes) - static_cast<double>(history[adapterId].rx);
-                            double txDiff = static_cast<double>(iface.txTotalBytes) - static_cast<double>(history[adapterId].tx);
-
-							// Protect against negative values due to counter resets or overflows
+                            double rxDiff = static_cast<double>(iface.rxTotalBytes) - static_cast<double>(g_history[adapterId].rx);
+                            double txDiff = static_cast<double>(iface.txTotalBytes) - static_cast<double>(g_history[adapterId].tx);
                             iface.rxBytesPerSec = (std::max)(0.0, rxDiff / dt);
                             iface.txBytesPerSec = (std::max)(0.0, txDiff / dt);
                         }
                     }
-					// Save current totals for next snapshot
-                    history[adapterId] = { iface.rxTotalBytes, iface.txTotalBytes, currentTime };
+                    g_history[adapterId] = { iface.rxTotalBytes, iface.txTotalBytes, currentTime };
                 }
 
-				// 4. Filtering: Only include active interfaces with traffic or loopback
+                // 4. Фильтрация
                 if (iface.isUp && (iface.rxTotalBytes > 0 || iface.isLoopback)) {
                     if (!iface.isLoopback) {
                         snap.totalRxPerSec += iface.rxBytesPerSec;
@@ -114,15 +121,10 @@ namespace Net {
 #include <net/if.h>
 
 namespace Net {
-    static double GetCurrentSeconds() {
-        auto now = std::chrono::steady_clock::now();
-        return std::chrono::duration<double>(now.time_since_epoch()).count();
-    }
-    NetworkSnapshot NetworkCollector::GetSnapshot() {
+    NetworkSnapshot GetSnapshot() {
         NetworkSnapshot snap;
         double currentTime = GetCurrentSeconds();
 
-		// 1. Take IP addresses from getifaddrs
         std::map<std::string, std::string> ipMap;
         struct ifaddrs* ifaddr, * ifa;
         if (getifaddrs(&ifaddr) != -1) {
@@ -136,11 +138,10 @@ namespace Net {
             freeifaddrs(ifaddr);
         }
 
-		// 2. Take RX/TX bytes from /proc/net/dev
         std::ifstream file("/proc/net/dev");
         std::string line;
-        std::getline(file, line); // Skip
-        std::getline(file, line); // Skip
+        std::getline(file, line);
+        std::getline(file, line);
 
         while (std::getline(file, line)) {
             std::stringstream ss(line);
@@ -149,9 +150,9 @@ namespace Net {
             name.erase(std::remove(name.begin(), name.end(), ':'), name.end());
 
             uint64_t rx, tx, dummy;
-            ss >> rx; // Receive bytes
-            for (int i = 0; i < 7; ++i) ss >> dummy; 
-            ss >> tx; // Transmit bytes
+            ss >> rx;
+            for (int i = 0; i < 7; ++i) ss >> dummy;
+            ss >> tx;
 
             InterfaceSnapshot iface;
             iface.name = name;
@@ -159,23 +160,23 @@ namespace Net {
             iface.rxTotalBytes = rx;
             iface.txTotalBytes = tx;
             iface.isLoopback = (name == "lo");
-			iface.isUp = true; // For simplicity, we assume all interfaces in /proc/net/dev are up. More complex logic can be added if needed.
+            iface.isUp = true;
 
-            if (history.count(name)) {
-                double dt = currentTime - history[name].timestamp;
+            if (g_history.count(name)) {
+                double dt = currentTime - g_history[name].timestamp;
                 if (dt > 0.1) {
-                    iface.rxBytesPerSec = (rx - history[name].rx) / dt;
-                    iface.txBytesPerSec = (tx - history[name].tx) / dt;
+                    iface.rxBytesPerSec = (rx - g_history[name].rx) / dt;
+                    iface.txBytesPerSec = (tx - g_history[name].tx) / dt;
                 }
             }
+            g_history[name] = { rx, tx, currentTime };
 
-            history[name] = { rx, tx, currentTime };
-
-            snap.totalRxPerSec += iface.rxBytesPerSec;
-            snap.totalTxPerSec += iface.txBytesPerSec;
+            if (!iface.isLoopback) {
+                snap.totalRxPerSec += iface.rxBytesPerSec;
+                snap.totalTxPerSec += iface.txBytesPerSec;
+            }
             snap.interfaces.push_back(iface);
         }
-
         return snap;
     }
 }

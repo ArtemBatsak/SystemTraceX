@@ -10,9 +10,8 @@ add_executable(SystemTraceX
     src/collectors/systeminfo/systemInfo.cpp
     src/collectors/disk/disk.cpp
     src/collectors/errors/errors.cpp
-    src/collectors/cpu/cpu.h
-    src/collectors/errors/errors.h
     src/collectors/network/network.cpp
+    src/collectors/process/process.cpp
 )
 
 # ---- DEFINES

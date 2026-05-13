@@ -12,10 +12,7 @@
 #include "src/collectors/systeminfo/systemInfo.h"
 #include "src/collectors/errors/errors.h"
 #include "src/collectors/network/network.h"
-/*
-#include "src/collectors/network/network.h"
 #include "src/collectors/process/process.h"
-*/
 
 void update() {
     while (true) {
@@ -27,7 +24,7 @@ void update() {
 
 int main()
 {
-	Net::NetworkCollector netCollector;
+	
 	auto updaterThread = std::thread(update);
     while (true) {
         
@@ -36,8 +33,8 @@ int main()
 		auto disk = Disk::GetSnapshot();
 		auto sys = SystemInfo::GetSnapshot();
 		auto errors = SystemErrors::GetSnapshot();
-
-		auto net = netCollector.GetSnapshot();
+		auto net = Net::GetSnapshot();
+		auto proc = Proc::GetSnapshot();
 
 
         std::cout << "CPU Usage: " << std::fixed << std::setprecision(2) << cpu.totalUsage << "%, Cores: " << cpu.coreCount << ", Name: " << cpu.cpuname << std::endl;
@@ -74,6 +71,12 @@ int main()
 		std::cout << "Network: Total RX: " << net.totalRxPerSec << " B/s, Total TX: " << net.totalTxPerSec << " B/s" << std::endl;
 		for (const auto& iface : net.interfaces) {
 			std::cout << "Interface: " << iface.name << ", IP: " << iface.ipv4 << ", RX: " << iface.rxBytesPerSec << " B/s, TX: " << iface.txBytesPerSec << " B/s, Total RX: " << iface.rxTotalBytes / (1024.0 * 1024) << " MB, Total TX: " << iface.txTotalBytes / (1024.0 * 1024) << " MB, Loopback: " << (iface.isLoopback ? "Yes" : "No") << ", Up: " << (iface.isUp ? "Yes" : "No") << std::endl;
+		}
+
+		std::cout << "===============================" << std::endl;
+		std::cout << "Processes: Total: " << proc.totalProcesses << std::endl;
+		for (const auto& p : proc.topProcesses) {
+			std::cout << "PID: " << p.pid << ", Name: " << p.name << ", CPU: " << p.cpuUsage << "%, Memory: " << p.memoryUsage / (1024.0 * 1024) << " MB, Importance Score: " << p.importanceScore << std::endl;
 		}
 		std::this_thread::sleep_for(std::chrono::seconds(5));
     }
