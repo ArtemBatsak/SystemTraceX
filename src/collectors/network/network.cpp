@@ -15,7 +15,7 @@ namespace Net {
     };
 
 	// Static map to hold history of each interface's rx/tx bytes and timestamp
-	// Sructure init one time and then updated on each snapshot retrieval
+	// Structure is initialized once and then updated on each snapshot retrieval
     static std::map<std::string, PrevData> g_history;
 
     static double GetCurrentSeconds() {
@@ -54,7 +54,7 @@ namespace Net {
             for (PIP_ADAPTER_ADDRESSES pCurr = pAddresses; pCurr != nullptr; pCurr = pCurr->Next) {
                 InterfaceSnapshot iface;
 
-                // 1. Имя (UTF-8)
+                // 1. Interface name (UTF-8)
                 int size_needed = WideCharToMultiByte(CP_UTF8, 0, pCurr->FriendlyName, -1, NULL, 0, NULL, NULL);
                 if (size_needed > 0) {
                     iface.name.resize(size_needed - 1);
@@ -77,7 +77,7 @@ namespace Net {
                 iface.isLoopback = (pCurr->IfType == IF_TYPE_SOFTWARE_LOOPBACK);
                 iface.isUp = (pCurr->OperStatus == IfOperStatusUp);
 
-                // 3. Статистика
+                // 3. Traffic statistics
                 MIB_IF_ROW2 row;
                 ZeroMemory(&row, sizeof(row));
                 row.InterfaceLuid = pCurr->Luid;
@@ -98,7 +98,7 @@ namespace Net {
                     g_history[adapterId] = { iface.rxTotalBytes, iface.txTotalBytes, currentTime };
                 }
 
-                // 4. Фильтрация
+                // 4. Filtering
                 if (iface.isUp && (iface.rxTotalBytes > 0 || iface.isLoopback)) {
                     if (!iface.isLoopback) {
                         snap.totalRxPerSec += iface.rxBytesPerSec;

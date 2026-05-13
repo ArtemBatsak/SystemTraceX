@@ -1,0 +1,19 @@
+# SystemTraceX Collectors (Short Guide)
+
+## Linux collectors
+- CPU collector: reads `/proc/stat` and computes total/per-core CPU usage from deltas between snapshots.
+- RAM collector: reads `/proc/meminfo` and reports total/used RAM plus swap-based commit values.
+- Disk collector: reads `/proc/mounts`, filters `/dev/*` block devices, and calculates free/total bytes via `statfs`.
+- Network collector: reads interface addresses via `getifaddrs` and traffic counters from `/proc/net/dev`; computes RX/TX per second from previous snapshot.
+- Process collector: scans `/proc/<pid>`, reads name, memory (`statm`) and CPU time (`stat`), computes CPU deltas, then returns top processes by importance score.
+- System info collector: uses `uname`, `sysinfo`, `/etc/os-release`, and DMI vendor data to report OS, host, uptime, architecture, and virtualization hints.
+- Error collector: runs `journalctl` and returns recent high-priority error messages.
+
+## Windows collectors
+- CPU collector: uses PDH counters (`\\Processor(_Total)\\% Processor Time` and per-core counters) and registry CPU model name.
+- RAM collector: uses `GlobalMemoryStatusEx` for physical memory and commit/pagefile metrics.
+- Disk collector: enumerates logical drives and collects free/total bytes with `GetDiskFreeSpaceExA`.
+- Network collector: enumerates adapters with `GetAdaptersAddresses`, reads counters using `GetIfEntry2`, and computes RX/TX per second from history.
+- Process collector: enumerates processes with ToolHelp API, reads memory via PSAPI, CPU via `GetProcessTimes`, and returns top processes by score.
+- System info collector: resolves Windows version through `RtlGetVersion`, reads architecture with `GetNativeSystemInfo`, and detects hypervisor via CPUID.
+- Error collector: queries Windows Event Log (`System` channel) and returns recent warning/error/critical events.

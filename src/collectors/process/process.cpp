@@ -8,7 +8,7 @@
 
 namespace Proc {
 
-    // Вспомогательная функция для получения времени в секундах
+    // Helper function to get current time in seconds
     static double GetCurrentSeconds() {
         auto now = std::chrono::steady_clock::now();
         return std::chrono::duration<double>(now.time_since_epoch()).count();
@@ -17,7 +17,7 @@ namespace Proc {
     // ==========================================================
     // WINDOWS IMPLEMENTATION
     // ==========================================================
-#ifdef _WIN32  // ИСПРАВЛЕНО: макрос должен быть большими буквами
+#ifdef _WIN32  // Windows macro is case-sensitive
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
@@ -124,7 +124,7 @@ namespace Proc {
 
         static std::map<uint32_t, LinuxCpuHistory> g_linuxCpuHistory;
 
-        // Функция для получения общего времени CPU системы из /proc/stat
+        // Returns total system CPU time from /proc/stat
         unsigned long long GetTotalCpuTime() {
             std::ifstream file("/proc/stat");
             std::string cpu;
@@ -144,24 +144,24 @@ namespace Proc {
 
             struct dirent* entry;
             while ((entry = readdir(dir)) != nullptr) {
-                // Пропускаем всё, что не является папкой с PID
+                // Skip entries that are not PID directories
                 if (!isdigit(entry->d_name[0])) continue;
 
                 uint32_t pid = std::stoi(entry->d_name);
                 ProcessEntry p;
                 p.pid = pid;
 
-                // 1. Получаем чистое имя процесса из /comm
+                // 1. Read process name from /comm
                 std::string commPath = "/proc/" + std::to_string(pid) + "/comm";
                 std::ifstream commFile(commPath);
                 if (commFile.is_open()) {
                     std::getline(commFile, p.name);
                 }
                 else {
-                    continue; // Если не удалось прочитать, вероятно процесс уже закрыт
+                    continue; // If unreadable, the process likely exited
                 }
 
-                // 2. Получаем точную память из /statm (в страницах)
+                // 2. Read resident memory from /statm (in pages)
                 std::string statmPath = "/proc/" + std::to_string(pid) + "/statm";
                 std::ifstream statmFile(statmPath);
                 unsigned long long dummy, resident;
@@ -169,16 +169,16 @@ namespace Proc {
                     p.memoryUsage = resident * pageSize;
                 }
 
-                // 3. Получаем CPU тики из /stat
+                // 3. Read CPU ticks from /stat
                 std::string statPath = "/proc/" + std::to_string(pid) + "/stat";
                 std::ifstream statFile(statPath);
                 if (statFile.is_open()) {
                     std::string tmp;
                     unsigned long long utime, stime;
 
-                    // Пропускаем первые 13 полей до utime
-                    // (поле имени в скобках может содержать пробелы, поэтому /stat надежно парсить сложно,
-                    // но для числовых полей после 13-го это работает нормально)
+                    // Skip the first 13 fields before utime
+                    // (the process name field in parentheses may include spaces, so /stat parsing is tricky,
+                    // but this approach is sufficient for numeric fields after the 13th one)
                     for (int i = 0; i < 13; ++i) statFile >> tmp;
                     if (statFile >> utime >> stime) {
                         unsigned long long procTime = utime + stime;
@@ -193,7 +193,7 @@ namespace Proc {
                     }
                 }
 
-                // 4. Считаем важность
+                // 4. Compute process importance score
                 double memMB = (double)p.memoryUsage / (1024.0 * 1024.0);
                 p.importanceScore = (p.cpuUsage * 1.5) + (memMB / 50.0);
 
@@ -203,16 +203,16 @@ namespace Proc {
 
             snap.totalProcesses = allProcesses.size();
 
-            // Сортировка по убыванию важности
+            // Sort by descending importance
             std::sort(allProcesses.begin(), allProcesses.end(), [](const ProcessEntry& a, const ProcessEntry& b) {
                 return a.importanceScore > b.importanceScore;
                 });
 
-            // Берем топ 20
+            // Keep top 20 processes
             size_t count = (std::min)((size_t)20, allProcesses.size());
             snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
 
-            // Периодическая очистка истории (чтобы не хранить данные о закрытых процессах)
+            // Periodically clear history to avoid keeping closed process entries
             if (g_linuxCpuHistory.size() > 2000) {
                 g_linuxCpuHistory.clear();
             }

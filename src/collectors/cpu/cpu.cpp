@@ -115,10 +115,10 @@ namespace CPU {
     };
 
     static CpuSnapshot currentCache;
-    static std::vector<CpuTime> lastTimes; // Для хранения предыдущего замера
+    static std::vector<CpuTime> lastTimes; // Stores the previous measurement for delta calculation
     static std::mutex cacheMutex;
 
-    // Чтение имени процессора
+    // Reads the CPU model name
     std::string FetchCpuModel() {
         std::ifstream file("/proc/cpuinfo");
         std::string line;
@@ -172,10 +172,10 @@ namespace CPU {
             float usage = (totalDiff == 0) ? 0.0f : (100.0f * activeDiff / totalDiff);
 
             if (i == 0) {
-                currentCache.totalUsage = usage; // Общая нагрузка
+                currentCache.totalUsage = usage; // Total CPU usage
             }
             else {
-                currentCache.perCoreUsage[i - 1] = usage; // Нагрузка по ядрам
+                currentCache.perCoreUsage[i - 1] = usage; // Per-core CPU usage
             }
         }
         lastTimes = std::move(newTimes);

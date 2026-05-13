@@ -7,7 +7,7 @@
 #include <string>
 namespace SystemInfo {
 
-    // Структура для RtlGetVersion (скрытая часть WinAPI)
+    // Structure for RtlGetVersion (internal WinAPI call)
     typedef struct _RTL_OSVERSIONINFOEXW {
         ULONG dwOSVersionInfoSize;
         ULONG dwMajorVersion;
@@ -19,7 +19,7 @@ namespace SystemInfo {
 
     typedef NTSTATUS(WINAPI* RtlGetVersionPtr)(RTL_OSVERSIONINFOEXW*);
 
-    // Умное определение версии ОС
+    // Detects detailed Windows version name
     static std::string GetPreciseWindowsName() {
         HMODULE hMod = GetModuleHandleA("ntdll.dll");
         if (hMod) {
@@ -32,7 +32,7 @@ namespace SystemInfo {
                     DWORD build = rovi.dwBuildNumber;
 
                     if (major == 10) {
-                        if (build >= 26100) return "Windows 11 (Insider/Next Gen)"; // Пока не 12!
+                        if (build >= 26100) return "Windows 11 (Insider/Next Gen)"; // Still not Windows 12
                         if (build >= 22000) return "Windows 11";
                         return "Windows 10";
                     }
@@ -47,7 +47,7 @@ namespace SystemInfo {
         return "Windows (Unknown)";
     }
 
-    // Умное определение архитектуры
+    // Detects system CPU architecture
     static std::string GetSystemArchitecture() {
         SYSTEM_INFO si;
         GetNativeSystemInfo(&si);
@@ -59,23 +59,23 @@ namespace SystemInfo {
         }
     }
 
-    // Финальная функция снимка
+    // Builds the full system snapshot
     SystemSnapshot GetSnapshot() {
         SystemSnapshot snap;
 
-        // 1. Имя ПК
+        // 1. Hostname
         char buf[MAX_COMPUTERNAME_LENGTH + 1];
         DWORD bSize = sizeof(buf);
         if (GetComputerNameA(buf, &bSize)) snap.hostname = buf;
 
-        // 2. ОС и Архитектура
+        // 2. OS and architecture
         snap.osName = GetPreciseWindowsName();
         snap.architecture = GetSystemArchitecture();
 
-        // 3. Аптайм
+        // 3. Uptime
         snap.uptimeSeconds = GetTickCount64() / 1000;
 
-        // 4. Виртуализация
+        // 4. Virtualization
         int cpu[4];
         __cpuid(cpu, 1);
         if ((cpu[2] >> 31) & 1) {
