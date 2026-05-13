@@ -4,7 +4,7 @@ project(SystemTraceX)
 set(CMAKE_CXX_STANDARD 17)
 
 add_executable(SystemTraceX
-    Monitor_test.cpp
+    SystemTraceX.cpp
     src/collectors/cpu/cpu.cpp
     src/collectors/ram/ram.cpp
     src/collectors/systeminfo/systemInfo.cpp
@@ -20,7 +20,7 @@ target_compile_definitions(SystemTraceX PRIVATE
     _CRT_SECURE_NO_WARNINGS
 )
 
-# ---- LIBS (Разделяем по платформам)
+# ---- LIBS
 
 if (WIN32)
     target_link_libraries(SystemTraceX PRIVATE
