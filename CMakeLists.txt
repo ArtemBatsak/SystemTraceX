@@ -12,7 +12,7 @@ add_executable(SystemTraceX
     src/collectors/errors/errors.cpp
     src/collectors/network/network.cpp
     src/collectors/process/process.cpp
-)
+ "src/collectors/collector.h")
 
 # ---- DEFINES
 target_compile_definitions(SystemTraceX PRIVATE
