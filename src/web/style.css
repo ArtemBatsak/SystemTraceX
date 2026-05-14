@@ -1,0 +1,21 @@
+:root { color-scheme: dark; }
+body { margin: 0; font-family: Inter, Arial, sans-serif; background: #0e1220; color: #ecf0ff; }
+.layout { padding: 20px; max-width: 1280px; margin: 0 auto; }
+.topbar { margin-bottom: 16px; }
+.topbar h1 { margin: 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.card, .panel, .table-wrap { background: #171d31; border: 1px solid #293252; border-radius: 16px; }
+.card { padding: 12px; }
+.card .k { color: #9eb0ec; font-size: 13px; }
+.card .v { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.panel { padding: 16px; margin-top: 14px; }
+.toggles { display: flex; flex-wrap: wrap; gap: 10px; }
+.toggles label { display: inline-flex; align-items: center; gap: 6px; background: #202946; border-radius: 999px; padding: 8px 12px; }
+.tables-panel { display: grid; gap: 12px; }
+.table-wrap { padding: 12px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid #28304d; }
+.charts-header { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.history-mode button { background: #263157; color: #f0f3ff; border: 1px solid #3f5188; border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.history-mode button.active { background: #3a4f92; }
+.chart { width: 100%; height: 420px; margin-top: 10px; }

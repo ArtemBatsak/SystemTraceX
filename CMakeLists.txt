@@ -15,6 +15,7 @@ add_executable(SystemTraceX
     src/collector/collector.cpp
     src//collectors/gpu/gpu.cpp
     src/web/web_helper.cpp
+    src/web/web.cpp
     
  "src/collectors/gpu/gpu.h" "src/collectors/gpu/gpu.cpp")
  

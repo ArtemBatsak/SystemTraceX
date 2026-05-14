@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SystemTraceX Dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+  <main class="layout">
+    <header class="topbar">
+      <h1>SystemTraceX</h1>
+      <p>Realtime telemetry (refresh every 1 second)</p>
+    </header>
+
+    <section class="cards" id="cards"></section>
+
+    <section class="panel table-toggle-panel">
+      <h2>Visible tables</h2>
+      <div id="tableToggles" class="toggles"></div>
+    </section>
+
+    <section class="panel tables-panel" id="tablesPanel"></section>
+
+    <section class="panel charts-panel">
+      <div class="charts-header">
+        <h2>History chart</h2>
+        <div class="history-mode">
+          <button data-mode="24h" class="active">24 hours</button>
+          <button data-mode="session">By session</button>
+        </div>
+        <select id="sessionSelect" disabled></select>
+      </div>
+      <div id="historyChart" class="chart"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

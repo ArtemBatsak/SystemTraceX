@@ -17,6 +17,7 @@ public:
     std::vector<Telemetry::AggregatedSnapshot> GetLongRangeSeries();
     std::vector<std::vector<Telemetry::AggregatedSnapshot>> GetSessionHistory();
 
+
 private:
     Telemetry::TelemetryCollector& collector_;
 };

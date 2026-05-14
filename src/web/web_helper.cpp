@@ -61,4 +61,5 @@ std::vector<std::vector<Telemetry::AggregatedSnapshot>> WebTelemetryHelper::GetS
     return sessions;
 }
 
+
 } // namespace Web
