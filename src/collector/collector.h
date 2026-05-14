@@ -17,6 +17,12 @@
 
 namespace Telemetry {
 
+enum class AggregatedRecordType : uint8_t {
+    Metric = 0,
+    SessionStart = 1,
+    SessionEnd = 2,
+};
+
 struct Snapshot {
     uint64_t timestampMs = 0;
     CPU::CpuSnapshot cpu;
@@ -27,8 +33,10 @@ struct Snapshot {
 };
 
 struct AggregatedSnapshot {
+    AggregatedRecordType recordType = AggregatedRecordType::Metric;
     uint64_t windowStartMs = 0;
     uint64_t windowEndMs = 0;
+    uint64_t sessionDurationMs = 0;
 
     double cpuAvg = 0.0;
     double cpuMin = 0.0;
@@ -50,10 +58,11 @@ struct AggregatedSnapshot {
 class TelemetryCollector {
 public:
     static constexpr size_t kLiveCapacity = 600;      // 10 minutes @ 1 second
-    static constexpr size_t kTenSecCapacity = 360;    // 1 hour @ 10 second aggregation
-    static constexpr size_t kMinuteCapacity = 60;     // 1 hour @ 60 second aggregation
+    static constexpr size_t kTenSecCapacity = 8640;   // 24 hours @ 10 second aggregation
+    static constexpr size_t kLongFileCapacity = 10000; // long-range persistent points
 
     explicit TelemetryCollector(std::string logDirectory);
+    ~TelemetryCollector();
 
     Snapshot CollectRawSnapshot();
     void PushLiveSnapshot(Snapshot snapshot);
@@ -68,9 +77,16 @@ public:
 private:
     static uint64_t NowMs();
     static AggregatedSnapshot AggregateWindow(const std::vector<Snapshot>& window);
-    void AppendBinary(const AggregatedSnapshot& snap, const std::string& fileName);
+
+    void AppendLongRecord(const AggregatedSnapshot& snap);
+    std::vector<AggregatedSnapshot> ReadLongRecords() const;
+    void TrimLongFileIfNeeded();
+    void WriteSessionStart(uint64_t tsMs);
+    void WriteSessionEnd(uint64_t startTsMs, uint64_t endTsMs);
+    void RecoverUnclosedSession();
 
     std::string logDirectory_;
+    std::string longFilePath_;
 
     mutable std::shared_mutex liveMutex_;
     std::deque<Snapshot> liveRing_;
@@ -78,7 +94,8 @@ private:
 
     mutable std::mutex binaryMutex_;
     std::deque<AggregatedSnapshot> tenSecRing_;
-    std::deque<AggregatedSnapshot> minuteRing_;
+    uint64_t currentSessionStartMs_ = 0;
+    bool sessionOpen_ = false;
 };
 
 } // namespace Telemetry

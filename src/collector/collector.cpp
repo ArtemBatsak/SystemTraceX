@@ -8,8 +8,20 @@
 namespace Telemetry {
 
 TelemetryCollector::TelemetryCollector(std::string logDirectory)
-    : logDirectory_(std::move(logDirectory)) {
+    : logDirectory_(std::move(logDirectory)),
+      longFilePath_(logDirectory_ + "/telemetry_long.bin") {
     std::filesystem::create_directories(logDirectory_);
+    RecoverUnclosedSession();
+    currentSessionStartMs_ = NowMs();
+    WriteSessionStart(currentSessionStartMs_);
+    sessionOpen_ = true;
+}
+
+TelemetryCollector::~TelemetryCollector() {
+    if (!sessionOpen_) return;
+    const auto endTs = lastSnapshot_.timestampMs > 0 ? lastSnapshot_.timestampMs : NowMs();
+    WriteSessionEnd(currentSessionStartMs_, endTs);
+    sessionOpen_ = false;
 }
 
 Snapshot TelemetryCollector::CollectRawSnapshot() {
@@ -48,7 +60,6 @@ void TelemetryCollector::FlushTenSecondAggregation() {
     if (tenSecRing_.size() > kTenSecCapacity) {
         tenSecRing_.pop_front();
     }
-    AppendBinary(aggregated, "telemetry_10s.bin");
 }
 
 void TelemetryCollector::FlushMinuteAggregation() {
@@ -60,6 +71,7 @@ void TelemetryCollector::FlushMinuteAggregation() {
     }
 
     AggregatedSnapshot m;
+    m.recordType = AggregatedRecordType::Metric;
     m.windowStartMs = source[source.size() - 6].windowStartMs;
     m.windowEndMs = source.back().windowEndMs;
 
@@ -90,11 +102,7 @@ void TelemetryCollector::FlushMinuteAggregation() {
     auto tx = minMaxAvg(txVals); m.netTxAvg = tx[0]; m.netTxMin = tx[1]; m.netTxMax = tx[2];
 
     std::lock_guard<std::mutex> lock(binaryMutex_);
-    minuteRing_.push_back(m);
-    if (minuteRing_.size() > kMinuteCapacity) {
-        minuteRing_.pop_front();
-    }
-    AppendBinary(m, "telemetry_60s.bin");
+    AppendLongRecord(m);
 }
 
 Snapshot TelemetryCollector::GetLastSnapshot() const {
@@ -114,7 +122,7 @@ std::vector<AggregatedSnapshot> TelemetryCollector::GetRecent24Hours() const {
 
 std::vector<AggregatedSnapshot> TelemetryCollector::GetLongRange() const {
     std::lock_guard<std::mutex> lock(binaryMutex_);
-    return {minuteRing_.begin(), minuteRing_.end()};
+    return ReadLongRecords();
 }
 
 uint64_t TelemetryCollector::NowMs() {
@@ -127,6 +135,7 @@ AggregatedSnapshot TelemetryCollector::AggregateWindow(const std::vector<Snapsho
     AggregatedSnapshot out;
     if (window.empty()) return out;
 
+    out.recordType = AggregatedRecordType::Metric;
     out.windowStartMs = window.front().timestampMs;
     out.windowEndMs = window.back().timestampMs;
 
@@ -166,10 +175,79 @@ AggregatedSnapshot TelemetryCollector::AggregateWindow(const std::vector<Snapsho
     return out;
 }
 
-void TelemetryCollector::AppendBinary(const AggregatedSnapshot& snap, const std::string& fileName) {
-    std::ofstream out(logDirectory_ + "/" + fileName, std::ios::binary | std::ios::app);
+void TelemetryCollector::AppendLongRecord(const AggregatedSnapshot& snap) {
+    std::ofstream out(longFilePath_, std::ios::binary | std::ios::app);
     if (!out.is_open()) return;
     out.write(reinterpret_cast<const char*>(&snap), sizeof(AggregatedSnapshot));
+    out.close();
+    TrimLongFileIfNeeded();
+}
+
+std::vector<AggregatedSnapshot> TelemetryCollector::ReadLongRecords() const {
+    std::vector<AggregatedSnapshot> records;
+    std::ifstream in(longFilePath_, std::ios::binary);
+    if (!in.is_open()) return records;
+
+    AggregatedSnapshot s;
+    while (in.read(reinterpret_cast<char*>(&s), sizeof(AggregatedSnapshot))) {
+        records.push_back(s);
+    }
+    return records;
+}
+
+void TelemetryCollector::TrimLongFileIfNeeded() {
+    auto records = ReadLongRecords();
+    if (records.size() <= kLongFileCapacity) return;
+
+    const size_t toDrop = records.size() - kLongFileCapacity;
+    records.erase(records.begin(), records.begin() + static_cast<std::ptrdiff_t>(toDrop));
+
+    std::ofstream out(longFilePath_, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) return;
+    out.write(reinterpret_cast<const char*>(records.data()),
+              static_cast<std::streamsize>(records.size() * sizeof(AggregatedSnapshot)));
+}
+
+void TelemetryCollector::WriteSessionStart(uint64_t tsMs) {
+    AggregatedSnapshot s;
+    s.recordType = AggregatedRecordType::SessionStart;
+    s.windowStartMs = tsMs;
+    s.windowEndMs = tsMs;
+    AppendLongRecord(s);
+}
+
+void TelemetryCollector::WriteSessionEnd(uint64_t startTsMs, uint64_t endTsMs) {
+    AggregatedSnapshot s;
+    s.recordType = AggregatedRecordType::SessionEnd;
+    s.windowStartMs = startTsMs;
+    s.windowEndMs = endTsMs;
+    s.sessionDurationMs = endTsMs > startTsMs ? (endTsMs - startTsMs) : 0;
+    AppendLongRecord(s);
+}
+
+void TelemetryCollector::RecoverUnclosedSession() {
+    auto records = ReadLongRecords();
+    if (records.empty()) return;
+
+    int64_t lastStart = -1;
+    for (int64_t i = static_cast<int64_t>(records.size()) - 1; i >= 0; --i) {
+        if (records[static_cast<size_t>(i)].recordType == AggregatedRecordType::SessionEnd) {
+            break;
+        }
+        if (records[static_cast<size_t>(i)].recordType == AggregatedRecordType::SessionStart) {
+            lastStart = i;
+            break;
+        }
+    }
+
+    if (lastStart < 0) return;
+
+    uint64_t endTs = records.back().windowEndMs;
+    if (endTs == 0) endTs = records.back().windowStartMs;
+    if (endTs == 0) endTs = NowMs();
+
+    const uint64_t startTs = records[static_cast<size_t>(lastStart)].windowStartMs;
+    WriteSessionEnd(startTs, endTs);
 }
 
 } // namespace Telemetry

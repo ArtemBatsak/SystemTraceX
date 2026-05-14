@@ -15,6 +15,7 @@ public:
     std::vector<Telemetry::Snapshot> GetLiveGraphBootstrap();
     std::vector<Telemetry::AggregatedSnapshot> Get24HoursSeries();
     std::vector<Telemetry::AggregatedSnapshot> GetLongRangeSeries();
+    std::vector<std::vector<Telemetry::AggregatedSnapshot>> GetSessionHistory();
 
 private:
     Telemetry::TelemetryCollector& collector_;
