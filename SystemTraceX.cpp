@@ -38,11 +38,21 @@ int main() {
             std::cout << current.timestampMs << " ms since epoch\n";
             auto disks = current.disk.disks;
             for (const auto& disk : disks) {
-                std::cout << "  Disk " << disk.name << ": " << disk.freeBytes / (1024.0 * 1024.0) << " MB free / "
-                    << disk.totalBytes / (1024.0 * 1024.0) << " MB total\n";
+                std::cout << "  Disk " << disk.name << ": " << disk.freeBytes / (1024.0 * 1024.0 * 1024.0) << " GB free / "
+                    << disk.totalBytes / (1024.0 * 1024.0 * 1024.0) << " GB total\n";
+            }
+            std::cout << "GPU(s): " << current.gpu.gpus.size() << "\n";
+			auto gpus = current.gpu.gpus;
+            for (const auto& gpu : gpus) {
+                std::cout << "  GPU " << gpu.name << ": " << gpu.vramUsedBytes / (1024.0 * 1024.0) << " MB used / "
+                    << gpu.vramTotalBytes / (1024.0 * 1024.0) << " MB total\n";
+                std::cout << "    Vendor: " << (gpu.vendor == GPU::Vendor::Nvidia ? "Nvidia" :
+                    gpu.vendor == GPU::Vendor::AMD ? "AMD" :
+					gpu.vendor == GPU::Vendor::Intel ? "Intel" : "Unknown") << "\n";
+				std::cout << "    Type: " << (gpu.isIntegrated ? "Integrated" : "Discrete") << "\n";
+				std::cout << "    Usage: " << gpu.usagePercent << "%\n";
             }
 
-            
 
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));

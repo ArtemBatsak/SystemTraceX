@@ -13,8 +13,10 @@ add_executable(SystemTraceX
     src/collectors/network/network.cpp
     src/collectors/process/process.cpp
     src/collector/collector.cpp
+    src//collectors/gpu/gpu.cpp
     src/web/web_helper.cpp
-)
+    
+ "src/collectors/gpu/gpu.h" "src/collectors/gpu/gpu.cpp")
  
 
 # ---- DEFINES

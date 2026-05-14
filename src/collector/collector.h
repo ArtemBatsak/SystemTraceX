@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "../collectors/cpu/cpu.h"
+#include "../collectors/gpu/gpu.h"
 #include "../collectors/disk/disk.h"
 #include "../collectors/network/network.h"
 #include "../collectors/ram/ram.h"
@@ -30,6 +31,7 @@ struct Snapshot {
     Disk::DiskSystemSnapshot disk;
     Net::NetworkSnapshot network;
     SystemInfo::SystemSnapshot system;
+	GPU::GpuSnapshot gpu;
 };
 
 struct AggregatedSnapshot {
@@ -41,6 +43,10 @@ struct AggregatedSnapshot {
     double cpuAvg = 0.0;
     double cpuMin = 0.0;
     double cpuMax = 0.0;
+
+	double gpyAvg = 0.0;
+	double gpuMin = 0.0;
+	double gpuMax = 0.0;
 
     double ramUsedAvg = 0.0;
     double ramUsedMin = 0.0;
