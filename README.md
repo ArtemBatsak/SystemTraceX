@@ -2,4 +2,15 @@
 
 SystemTraceX is a lightweight cross-platform system monitoring and telemetry tool with real-time metrics collection.
 
-See a short collector-by-collector overview in `Collectors.txt` (separate Linux and Windows sections).
+## Documentation
+
+- Collector module documentation: `src/collector/README.md`
+- Web helper documentation: `src/web/README.md`
+- Short collector overview: `Collectors.txt`
+
+## Quick class setup
+
+```cpp
+Telemetry::TelemetryCollector collector("./telemetry_logs");
+Web::WebTelemetryHelper webHelper(collector);
+```
