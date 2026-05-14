@@ -113,14 +113,23 @@ Always collect first, then push to the live buffer.
 - `FlushMinuteAggregation()`
   - Uses the latest six 10-second aggregates,
   - computes 1-minute avg/min/max aggregate,
-  - pushes to `minuteRing_`,
-  - writes `telemetry_60s.bin`.
+  - appends binary record to `telemetry_long.bin`.
+
+- Long-range file rotation:
+  - On startup, if `telemetry_long.bin` is larger than 1 MB, collector removes
+    previous `telemetry_long-1.bin` (if present), renames current file to
+    `telemetry_long-1.bin`, and starts writing to a fresh `telemetry_long.bin`.
+  - During runtime, before appending next record, if `telemetry_long.bin` is
+    larger than 2 MB, collector forcibly closes the current session with
+    `SessionEnd`, rotates file to `telemetry_long-1.bin`, writes `SessionStart`
+    to a new `telemetry_long.bin`, then continues normal writes.
 
 - Read methods:
   - `GetLastSnapshot()` — last live snapshot,
   - `GetLiveWindow()` — live ring as vector,
   - `GetRecent24Hours()` — 10-second aggregate series,
-  - `GetLongRange()` — minute aggregate series.
+  - `GetLongRange()` — minute aggregate series merged from
+    `telemetry_long-1.bin` first and `telemetry_long.bin` second.
 
 ### Short loop example
 

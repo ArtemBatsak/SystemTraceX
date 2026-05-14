@@ -12,6 +12,7 @@ TelemetryCollector::TelemetryCollector(std::string logDirectory)
       longFilePath_(logDirectory_ + "/telemetry_long.bin") {
     std::filesystem::create_directories(logDirectory_);
     RecoverUnclosedSession();
+    RotateLongFileIfNeeded(kLongFileStartupMaxBytes);
     currentSessionStartMs_ = NowMs();
     WriteSessionStart(currentSessionStartMs_);
     sessionOpen_ = true;
@@ -122,7 +123,7 @@ std::vector<AggregatedSnapshot> TelemetryCollector::GetRecent24Hours() const {
 
 std::vector<AggregatedSnapshot> TelemetryCollector::GetLongRange() const {
     std::lock_guard<std::mutex> lock(binaryMutex_);
-    return ReadLongRecords();
+    return ReadCombinedLongRecords();
 }
 
 uint64_t TelemetryCollector::NowMs() {
@@ -176,16 +177,41 @@ AggregatedSnapshot TelemetryCollector::AggregateWindow(const std::vector<Snapsho
 }
 
 void TelemetryCollector::AppendLongRecord(const AggregatedSnapshot& snap) {
-    std::ofstream out(longFilePath_, std::ios::binary | std::ios::app);
-    if (!out.is_open()) return;
-    out.write(reinterpret_cast<const char*>(&snap), sizeof(AggregatedSnapshot));
-    out.close();
-    TrimLongFileIfNeeded();
+    auto appendRaw = [this](const AggregatedSnapshot& rawSnap) {
+        std::ofstream out(longFilePath_, std::ios::binary | std::ios::app);
+        if (!out.is_open()) return;
+        out.write(reinterpret_cast<const char*>(&rawSnap), sizeof(AggregatedSnapshot));
+    };
+
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(longFilePath_, ec) && !ec;
+    const auto currentSize = exists ? std::filesystem::file_size(longFilePath_, ec) : 0;
+    if (!ec && currentSize > kLongFileRuntimeRotateBytes && sessionOpen_) {
+        const uint64_t endTs = lastSnapshot_.timestampMs > 0 ? lastSnapshot_.timestampMs : NowMs();
+
+        AggregatedSnapshot endRecord;
+        endRecord.recordType = AggregatedRecordType::SessionEnd;
+        endRecord.windowStartMs = currentSessionStartMs_;
+        endRecord.windowEndMs = endTs;
+        endRecord.sessionDurationMs = endTs > currentSessionStartMs_ ? (endTs - currentSessionStartMs_) : 0;
+        appendRaw(endRecord);
+
+        if (RotateLongFileIfNeeded(kLongFileRuntimeRotateBytes)) {
+            currentSessionStartMs_ = NowMs();
+            AggregatedSnapshot startRecord;
+            startRecord.recordType = AggregatedRecordType::SessionStart;
+            startRecord.windowStartMs = currentSessionStartMs_;
+            startRecord.windowEndMs = currentSessionStartMs_;
+            appendRaw(startRecord);
+        }
+    }
+
+    appendRaw(snap);
 }
 
-std::vector<AggregatedSnapshot> TelemetryCollector::ReadLongRecords() const {
+std::vector<AggregatedSnapshot> TelemetryCollector::ReadLongRecords(const std::string& filePath) const {
     std::vector<AggregatedSnapshot> records;
-    std::ifstream in(longFilePath_, std::ios::binary);
+    std::ifstream in(filePath, std::ios::binary);
     if (!in.is_open()) return records;
 
     AggregatedSnapshot s;
@@ -195,17 +221,37 @@ std::vector<AggregatedSnapshot> TelemetryCollector::ReadLongRecords() const {
     return records;
 }
 
-void TelemetryCollector::TrimLongFileIfNeeded() {
-    auto records = ReadLongRecords();
-    if (records.size() <= kLongFileCapacity) return;
+std::vector<AggregatedSnapshot> TelemetryCollector::ReadCombinedLongRecords() const {
+    std::vector<AggregatedSnapshot> records;
+    const auto rotatedPath = RotatedLongFilePath();
 
-    const size_t toDrop = records.size() - kLongFileCapacity;
-    records.erase(records.begin(), records.begin() + static_cast<std::ptrdiff_t>(toDrop));
+    auto previousRecords = ReadLongRecords(rotatedPath);
+    records.insert(records.end(), previousRecords.begin(), previousRecords.end());
 
-    std::ofstream out(longFilePath_, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) return;
-    out.write(reinterpret_cast<const char*>(records.data()),
-              static_cast<std::streamsize>(records.size() * sizeof(AggregatedSnapshot)));
+    auto currentRecords = ReadLongRecords(longFilePath_);
+    records.insert(records.end(), currentRecords.begin(), currentRecords.end());
+    return records;
+}
+
+bool TelemetryCollector::RotateLongFileIfNeeded(uintmax_t maxBytes) {
+    std::error_code ec;
+    if (!std::filesystem::exists(longFilePath_, ec) || ec) return false;
+
+    const auto fileSize = std::filesystem::file_size(longFilePath_, ec);
+    if (ec || fileSize <= maxBytes) return false;
+
+    const auto rotatedPath = RotatedLongFilePath();
+    std::filesystem::remove(rotatedPath, ec);
+    ec.clear();
+
+    std::filesystem::rename(longFilePath_, rotatedPath, ec);
+    if (ec) return false;
+
+    return true;
+}
+
+std::string TelemetryCollector::RotatedLongFilePath() const {
+    return logDirectory_ + "/telemetry_long-1.bin";
 }
 
 void TelemetryCollector::WriteSessionStart(uint64_t tsMs) {
@@ -226,7 +272,7 @@ void TelemetryCollector::WriteSessionEnd(uint64_t startTsMs, uint64_t endTsMs) {
 }
 
 void TelemetryCollector::RecoverUnclosedSession() {
-    auto records = ReadLongRecords();
+    auto records = ReadLongRecords(longFilePath_);
     if (records.empty()) return;
 
     int64_t lastStart = -1;

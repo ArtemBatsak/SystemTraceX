@@ -59,7 +59,8 @@ class TelemetryCollector {
 public:
     static constexpr size_t kLiveCapacity = 600;      // 10 minutes @ 1 second
     static constexpr size_t kTenSecCapacity = 8640;   // 24 hours @ 10 second aggregation
-    static constexpr size_t kLongFileCapacity = 10000; // long-range persistent points
+    static constexpr uintmax_t kLongFileStartupMaxBytes = 1u * 1024u * 1024u;
+    static constexpr uintmax_t kLongFileRuntimeRotateBytes = 2u * 1024u * 1024u;
 
     explicit TelemetryCollector(std::string logDirectory);
     ~TelemetryCollector();
@@ -79,8 +80,10 @@ private:
     static AggregatedSnapshot AggregateWindow(const std::vector<Snapshot>& window);
 
     void AppendLongRecord(const AggregatedSnapshot& snap);
-    std::vector<AggregatedSnapshot> ReadLongRecords() const;
-    void TrimLongFileIfNeeded();
+    std::vector<AggregatedSnapshot> ReadLongRecords(const std::string& filePath) const;
+    std::vector<AggregatedSnapshot> ReadCombinedLongRecords() const;
+    bool RotateLongFileIfNeeded(uintmax_t maxBytes);
+    std::string RotatedLongFilePath() const;
     void WriteSessionStart(uint64_t tsMs);
     void WriteSessionEnd(uint64_t startTsMs, uint64_t endTsMs);
     void RecoverUnclosedSession();
