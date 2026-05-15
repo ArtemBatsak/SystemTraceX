@@ -1,7 +1,5 @@
 #include "web_helper.h"
 
-namespace Web {
-
 WebTelemetryHelper::WebTelemetryHelper(Telemetry::TelemetryCollector& collector)
     : collector_(collector) {}
 
@@ -62,4 +60,3 @@ std::vector<std::vector<Telemetry::AggregatedSnapshot>> WebTelemetryHelper::GetS
 }
 
 
-} // namespace Web

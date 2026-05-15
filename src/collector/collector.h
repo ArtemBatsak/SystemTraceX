@@ -44,9 +44,12 @@ struct AggregatedSnapshot {
     double cpuMin = 0.0;
     double cpuMax = 0.0;
 
-	double gpyAvg = 0.0;
-	double gpuMin = 0.0;
-	double gpuMax = 0.0;
+	double gpuAvg = 0.0;
+    double gpuMin = 0.0;
+    double gpuMax = 0.0;
+
+    double ramPercentAvg = 0.0;
+    double diskPercentAvg = 0.0;
 
     double ramUsedAvg = 0.0;
     double ramUsedMin = 0.0;

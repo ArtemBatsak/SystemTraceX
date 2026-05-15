@@ -91,17 +91,21 @@ void TelemetryCollector::FlushMinuteAggregation() {
         return std::array<double, 3>{sum / vals.size(), minV, maxV};
     };
 
-    std::array<double, 6> cpuVals{}, ramVals{}, rxVals{}, txVals{};
+    std::array<double, 6> cpuVals{}, gpuVals{}, ramVals{}, diskVals{}, rxVals{}, txVals{};
     for (size_t i = 0; i < 6; ++i) {
         const auto& s = source[source.size() - 6 + i];
         cpuVals[i] = s.cpuAvg;
+        gpuVals[i] = s.gpuAvg;
         ramVals[i] = s.ramUsedAvg;
+        diskVals[i] = s.diskPercentAvg;
         rxVals[i] = s.netRxAvg;
         txVals[i] = s.netTxAvg;
     }
 
     auto cpu = minMaxAvg(cpuVals); m.cpuAvg = cpu[0]; m.cpuMin = cpu[1]; m.cpuMax = cpu[2];
+    auto gpu = minMaxAvg(gpuVals); m.gpuAvg = gpu[0]; m.gpuMin = gpu[1]; m.gpuMax = gpu[2];
     auto ram = minMaxAvg(ramVals); m.ramUsedAvg = ram[0]; m.ramUsedMin = ram[1]; m.ramUsedMax = ram[2];
+    m.diskPercentAvg = minMaxAvg(diskVals)[0];
     auto rx = minMaxAvg(rxVals); m.netRxAvg = rx[0]; m.netRxMin = rx[1]; m.netRxMax = rx[2];
     auto tx = minMaxAvg(txVals); m.netTxAvg = tx[0]; m.netTxMin = tx[1]; m.netTxMax = tx[2];
 
@@ -147,6 +151,10 @@ AggregatedSnapshot TelemetryCollector::AggregateWindow(const std::vector<Snapsho
     double cpuMax = std::numeric_limits<double>::lowest();
     double cpuSum = 0.0;
 
+    double gpuMin = std::numeric_limits<double>::max();
+    double gpuMax = std::numeric_limits<double>::lowest();
+    double gpuSum = 0.0;
+
     double ramMin = std::numeric_limits<double>::max();
     double ramMax = std::numeric_limits<double>::lowest();
     double ramSum = 0.0;
@@ -159,23 +167,40 @@ AggregatedSnapshot TelemetryCollector::AggregateWindow(const std::vector<Snapsho
     double txMax = std::numeric_limits<double>::lowest();
     double txSum = 0.0;
 
+    double ramPercentSum = 0.0;
+    double diskPercentSum = 0.0;
+
     for (const auto& s : window) {
         const double cpu = s.cpu.totalUsage;
+        double gpu = 0.0;
+        if (!s.gpu.gpus.empty()) {
+            for (const auto& g : s.gpu.gpus) gpu += g.usagePercent;
+            gpu /= static_cast<double>(s.gpu.gpus.size());
+        }
         const double ram = static_cast<double>(s.memory.usedRAM);
         const double rx = s.network.totalRxPerSec;
         const double tx = s.network.totalTxPerSec;
 
         cpuSum += cpu; cpuMin = std::min(cpuMin, cpu); cpuMax = std::max(cpuMax, cpu);
+        gpuSum += gpu; gpuMin = std::min(gpuMin, gpu); gpuMax = std::max(gpuMax, gpu);
         ramSum += ram; ramMin = std::min(ramMin, ram); ramMax = std::max(ramMax, ram);
         rxSum += rx; rxMin = std::min(rxMin, rx); rxMax = std::max(rxMax, rx);
         txSum += tx; txMin = std::min(txMin, tx); txMax = std::max(txMax, tx);
+
+        ramPercentSum += s.memory.totalRAM ? (100.0 * static_cast<double>(s.memory.usedRAM) / static_cast<double>(s.memory.totalRAM)) : 0.0;
+        uint64_t total=0, free=0; for (const auto& d : s.disk.disks){ total += d.totalBytes; free += d.freeBytes; }
+        const double diskPercent = total ? (100.0 * static_cast<double>(total - free) / static_cast<double>(total)) : 0.0;
+        diskPercentSum += diskPercent;
     }
 
     const double n = static_cast<double>(window.size());
     out.cpuAvg = cpuSum / n; out.cpuMin = cpuMin; out.cpuMax = cpuMax;
+    out.gpuAvg = gpuSum / n; out.gpuMin = gpuMin; out.gpuMax = gpuMax;
     out.ramUsedAvg = ramSum / n; out.ramUsedMin = ramMin; out.ramUsedMax = ramMax;
     out.netRxAvg = rxSum / n; out.netRxMin = rxMin; out.netRxMax = rxMax;
     out.netTxAvg = txSum / n; out.netTxMin = txMin; out.netTxMax = txMax;
+    out.ramPercentAvg = ramPercentSum / n;
+    out.diskPercentAvg = diskPercentSum / n;
     return out;
 }
 

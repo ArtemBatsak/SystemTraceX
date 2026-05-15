@@ -1,15 +1,29 @@
 #pragma once
 
+#include <functional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "web_helper.h"
 
-namespace Web {
+struct WebResponse {
+    int status = 200;
+    std::string contentType;
+    std::string body;
+};
 
-class WebSite {
+class Web {
 public:
-    explicit WebSite(WebTelemetryHelper& helper);
+    explicit Web(WebTelemetryHelper& helper);
 
+    using RouteHandler = std::function<WebResponse()>;
+
+    void RegisterRoute(const std::string& path, RouteHandler handler);
+    void RegisterDefaultRoutes();
+    WebResponse HandleRequest(const std::string& path) const;
+
+private:
     std::string GetIndexHtml() const;
     std::string GetStyleCss() const;
     std::string GetAppJs() const;
@@ -18,16 +32,14 @@ public:
     std::string Get24HoursHistoryJson() const;
     std::string GetSessionHistoryJson() const;
     std::string GetLiveHistoryJson() const;
+    std::string GetLongHistoryJson() const;
 
-private:
     static std::string EscapeJson(const std::string& value);
-
     static std::string BuildSnapshotJson(const Telemetry::Snapshot& snapshot);
     static std::string BuildAggregatedSeriesJson(const std::vector<Telemetry::AggregatedSnapshot>& series);
     static std::string BuildLiveSeriesJson(const std::vector<Telemetry::Snapshot>& series);
     static std::string BuildSessionHistoryJson(const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions);
 
     WebTelemetryHelper& helper_;
+    std::unordered_map<std::string, RouteHandler> routes_;
 };
-
-} // namespace Web

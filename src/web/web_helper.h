@@ -5,8 +5,6 @@
 
 #include "../collector/collector.h"
 
-namespace Web {
-
 class WebTelemetryHelper {
 public:
     explicit WebTelemetryHelper(Telemetry::TelemetryCollector& collector);
@@ -21,5 +19,3 @@ public:
 private:
     Telemetry::TelemetryCollector& collector_;
 };
-
-} // namespace Web
