@@ -17,12 +17,14 @@ public:
     std::string GetCurrentSnapshotJson() const;
     std::string Get24HoursHistoryJson() const;
     std::string GetSessionHistoryJson() const;
+    std::string GetLiveHistoryJson() const;
 
 private:
     static std::string EscapeJson(const std::string& value);
 
     static std::string BuildSnapshotJson(const Telemetry::Snapshot& snapshot);
     static std::string BuildAggregatedSeriesJson(const std::vector<Telemetry::AggregatedSnapshot>& series);
+    static std::string BuildLiveSeriesJson(const std::vector<Telemetry::Snapshot>& series);
     static std::string BuildSessionHistoryJson(const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions);
 
     WebTelemetryHelper& helper_;

@@ -17,7 +17,7 @@ std::string WebSite::GetIndexHtml() const {
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 </head>
 <body>
-  <main class="layout"><header class="topbar"><h1>SystemTraceX</h1><p>Realtime telemetry (refresh every 1 second)</p></header><section class="cards" id="cards"></section><section class="panel table-toggle-panel"><h2>Visible tables</h2><div id="tableToggles" class="toggles"></div></section><section class="panel tables-panel" id="tablesPanel"></section><section class="panel charts-panel"><div class="charts-header"><h2>History chart</h2><div class="history-mode"><button data-mode="24h" class="active">24 hours</button><button data-mode="session">By session</button></div><select id="sessionSelect" disabled></select></div><div id="historyChart" class="chart"></div></section></main>
+  <main class="layout"><header class="topbar"><h1>SystemTraceX</h1><p>Realtime telemetry (refresh every 1 second)</p></header><section class="cards" id="cards"></section><section class="panel table-toggle-panel"><h2>Visible tables</h2><div id="tableToggles" class="toggles"></div></section><section class="panel tables-panel" id="tablesPanel"></section><section class="panel charts-panel"><div class="charts-header"><h2>History chart</h2><div class="history-mode"><button data-mode="24h" class="active">24 hours</button><button data-mode="session">By session</button></div><select id="sessionSelect" disabled></select></div><div id="historyChart" class="chart"></div></section><section class="panel charts-panel"><div class="charts-header"><h2>Live chart</h2></div><div id="liveChart" class="chart"></div></section></main>
   <script src="/app.js"></script>
 </body>
 </html>)HTML";
@@ -34,8 +34,9 @@ const tablesPanel = document.getElementById('tablesPanel');
 const sessionSelect = document.getElementById('sessionSelect');
 const modeButtons = [...document.querySelectorAll('.history-mode button')];
 const chart = echarts.init(document.getElementById('historyChart'));
+const liveChart = echarts.init(document.getElementById('liveChart'));
 const tableState = new Map([['cpu', true], ['memory', true], ['disk', true], ['network', true], ['system', true], ['gpu', true]]);
-let chartMode = '24h'; let sessions = []; let series24h = [];
+let chartMode = '24h'; let sessions = []; let series24h = []; let liveSeries = [];
 const fmtMb = v => (v / (1024 * 1024)).toFixed(1); const fmtGb = v => (v / (1024 * 1024 * 1024)).toFixed(2); const fmtTime = ms => new Date(ms).toLocaleTimeString();
 async function loadJson(url) { const r = await fetch(url); return r.json(); }
 )JS";
@@ -48,7 +49,9 @@ function asMetricSeries(rows){const filtered=rows.filter(r=>r.recordType===0);re
 function redrawChart(){const source=chartMode==='24h'?series24h:(sessions[sessionSelect.value]||[]);const p=asMetricSeries(source);chart.setOption({tooltip:{trigger:'axis'},legend:{data:['CPU %','RAM MB']},dataZoom:[{type:'inside'},{type:'slider'}],xAxis:{type:'category',data:p.x},yAxis:[{type:'value',name:'CPU %'},{type:'value',name:'RAM MB'}],series:[{name:'CPU %',type:'line',smooth:true,data:p.cpu},{name:'RAM MB',type:'line',smooth:true,yAxisIndex:1,data:p.ram}]});}
 async function refreshSnapshot(){const s=await loadJson('/api/current');drawCards(s);drawTables(s);}
 async function initHistory(){series24h=await loadJson('/api/history/24h');sessions=await loadJson('/api/history/sessions');sessionSelect.innerHTML=sessions.map((_,i)=>`<option value="${i}">Session ${i+1}</option>`).join('');redrawChart();}
-modeButtons.forEach(b=>b.onclick=()=>{modeButtons.forEach(x=>x.classList.remove('active'));b.classList.add('active');chartMode=b.dataset.mode;sessionSelect.disabled=chartMode!=='session';redrawChart();});sessionSelect.onchange=redrawChart;window.addEventListener('resize',()=>chart.resize());(async function boot(){drawToggles();await refreshSnapshot();await initHistory();setInterval(refreshSnapshot,1000);setInterval(initHistory,1000);})();
+function redrawLiveChart(){const x=liveSeries.map(r=>fmtTime(r.timestampMs));const cpu=liveSeries.map(r=>r.cpu.totalUsage);const ram=liveSeries.map(r=>r.memory.usedRAM/(1024*1024));liveChart.setOption({tooltip:{trigger:'axis'},legend:{data:['CPU %','RAM MB']},dataZoom:[{type:'inside'},{type:'slider'}],xAxis:{type:'category',data:x},yAxis:[{type:'value',name:'CPU %'},{type:'value',name:'RAM MB'}],series:[{name:'CPU %',type:'line',smooth:true,data:cpu},{name:'RAM MB',type:'line',smooth:true,yAxisIndex:1,data:ram}]});}
+async function initLiveHistory(){liveSeries=await loadJson('/api/history/live');redrawLiveChart();}
+modeButtons.forEach(b=>b.onclick=()=>{modeButtons.forEach(x=>x.classList.remove('active'));b.classList.add('active');chartMode=b.dataset.mode;sessionSelect.disabled=chartMode!=='session';redrawChart();});sessionSelect.onchange=redrawChart;window.addEventListener('resize',()=>{chart.resize();liveChart.resize();});(async function boot(){drawToggles();await refreshSnapshot();await initHistory();await initLiveHistory();setInterval(refreshSnapshot,1000);setInterval(initHistory,1000);setInterval(initLiveHistory,1000);})();
 )JS";
     return js;
 }
@@ -63,6 +66,10 @@ std::string WebSite::Get24HoursHistoryJson() const {
 
 std::string WebSite::GetSessionHistoryJson() const {
     return BuildSessionHistoryJson(helper_.GetSessionHistory());
+}
+
+std::string WebSite::GetLiveHistoryJson() const {
+    return BuildLiveSeriesJson(helper_.GetLiveGraphBootstrap());
 }
 
 std::string WebSite::EscapeJson(const std::string& value) {
@@ -124,6 +131,17 @@ std::string WebSite::BuildAggregatedSeriesJson(const std::vector<Telemetry::Aggr
             << ",\"ramUsedAvg\":" << e.ramUsedAvg << '}';
     }
     oss << ']';
+    return oss.str();
+}
+
+std::string WebSite::BuildLiveSeriesJson(const std::vector<Telemetry::Snapshot>& series) {
+    std::ostringstream oss;
+    oss << "[";
+    for (size_t i = 0; i < series.size(); ++i) {
+        if (i) oss << ",";
+        oss << BuildSnapshotJson(series[i]);
+    }
+    oss << "]";
     return oss.str();
 }
 
