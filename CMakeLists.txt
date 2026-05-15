@@ -13,28 +13,27 @@ add_executable(SystemTraceX
     src/collectors/network/network.cpp
     src/collectors/process/process.cpp
     src/collector/collector.cpp
-    src//collectors/gpu/gpu.cpp
+    src/collectors/gpu/gpu.cpp
     src/web/web_helper.cpp
     src/web/web.cpp
-    
- "src/collectors/gpu/gpu.h" "src/collectors/gpu/gpu.cpp")
- 
-
-# ---- DEFINES
-target_compile_definitions(SystemTraceX PRIVATE
-    _WIN32_WINNT=0x0601
-    _CRT_SECURE_NO_WARNINGS
 )
 
-# ---- LIBS
+
+find_package(httplib CONFIG REQUIRED)
+
+target_link_libraries(SystemTraceX PRIVATE httplib::httplib)
+
+target_compile_definitions(SystemTraceX PRIVATE
+    _WIN32_WINNT=0x0A00
+    _CRT_SECURE_NO_WARNINGS
+)
 
 if (WIN32)
     target_link_libraries(SystemTraceX PRIVATE
         pdh
         PowrProf
         wevtapi
-        iphlpapi    
+        iphlpapi
         ws2_32
     )
 endif()
-

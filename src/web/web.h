@@ -1,45 +1,66 @@
 #pragma once
 
-#include <functional>
 #include <string>
-#include <unordered_map>
 #include <vector>
+#include <mutex>
+#include <memory>
 
+#include "httplib.h"
 #include "web_helper.h"
 
-struct WebResponse {
-    int status = 200;
-    std::string contentType;
-    std::string body;
-};
-
+// =========================
+// Web server + telemetry UI
+// =========================
 class Web {
 public:
     explicit Web(WebTelemetryHelper& helper);
 
-    using RouteHandler = std::function<WebResponse()>;
-
-    void RegisterRoute(const std::string& path, RouteHandler handler);
-    void RegisterDefaultRoutes();
-    WebResponse HandleRequest(const std::string& path) const;
+    void Start(int port);
 
 private:
+    void SetupRoutes();
+
+    // =========================
+    // UI
+    // =========================
     std::string GetIndexHtml() const;
     std::string GetStyleCss() const;
     std::string GetAppJs() const;
 
+    // =========================
+    // API JSON
+    // =========================
     std::string GetCurrentSnapshotJson() const;
-    std::string Get24HoursHistoryJson() const;
-    std::string GetSessionHistoryJson() const;
     std::string GetLiveHistoryJson() const;
+    std::string Get24HoursHistoryJson() const;
     std::string GetLongHistoryJson() const;
+    std::string GetSessionHistoryJson() const;
 
-    static std::string EscapeJson(const std::string& value);
-    static std::string BuildSnapshotJson(const Telemetry::Snapshot& snapshot);
-    static std::string BuildAggregatedSeriesJson(const std::vector<Telemetry::AggregatedSnapshot>& series);
-    static std::string BuildLiveSeriesJson(const std::vector<Telemetry::Snapshot>& series);
-    static std::string BuildSessionHistoryJson(const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions);
+    // =========================
+    // JSON builders
+    // (они у тебя уже в cpp)
+    // =========================
+    std::string BuildSnapshotJson(const Telemetry::Snapshot& s) const;
+    std::string BuildAggregatedSeriesJson(const std::vector<Telemetry::AggregatedSnapshot>& series) const;
+    std::string BuildLiveSeriesJson(const std::vector<Telemetry::Snapshot>& series) const;
+    std::string BuildSessionHistoryJson(const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions) const;
 
+private:
     WebTelemetryHelper& helper_;
-    std::unordered_map<std::string, RouteHandler> routes_;
+
+    httplib::Server svr_;
+
+    // =========================
+    // CACHE (shared with telemetry thread)
+    // =========================
+    struct Cache {
+        Telemetry::Snapshot current;
+        std::vector<Telemetry::Snapshot> live;
+        std::vector<Telemetry::AggregatedSnapshot> h24;
+        std::vector<Telemetry::AggregatedSnapshot> longSeries;
+        std::vector<std::vector<Telemetry::AggregatedSnapshot>> sessions;
+    };
+
+    Cache cache_;
+    mutable std::mutex cache_mtx_;
 };

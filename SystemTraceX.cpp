@@ -22,13 +22,12 @@ int main() {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     });
+    auto webThread = std::thread([&]() {
+        web.Start(8080);
+	});
+   
 
-    // Example route usage (server integration point):
-    auto root = web.HandleRequest("/");
-    (void)root;
-
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-    running.store(false);
+	webThread.join();
     telemetryThread.join();
     return 0;
 }
