@@ -1,10 +1,15 @@
 ﻿cmake_minimum_required(VERSION 3.10)
+
 project(SystemTraceX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# ---------------- EXECUTABLE ----------------
 
 add_executable(SystemTraceX
     SystemTraceX.cpp
+
     src/collectors/cpu/cpu.cpp
     src/collectors/ram/ram.cpp
     src/collectors/systeminfo/systemInfo.cpp
@@ -14,19 +19,29 @@ add_executable(SystemTraceX
     src/collectors/process/process.cpp
     src/collector/collector.cpp
     src/collectors/gpu/gpu.cpp
+
     src/web/web_helper.cpp
     src/web/web.cpp
 )
 
+# ---------------- VCPKG PACKAGES ----------------
 
 find_package(httplib CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
-target_link_libraries(SystemTraceX PRIVATE httplib::httplib)
+target_link_libraries(SystemTraceX PRIVATE
+    httplib::httplib
+    nlohmann_json::nlohmann_json
+)
+
+# ---------------- DEFINES ----------------
 
 target_compile_definitions(SystemTraceX PRIVATE
     _WIN32_WINNT=0x0A00
     _CRT_SECURE_NO_WARNINGS
 )
+
+# ---------------- WINDOWS LIBS ----------------
 
 if (WIN32)
     target_link_libraries(SystemTraceX PRIVATE

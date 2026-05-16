@@ -1,17 +1,18 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <iostream>
 
+#include "src/web/web_helper.h"
 #include "src/collector/collector.h"
 #include "src/web/web.h"
-#include "src/web/web_helper.h"
 
 int main() {
+
     Telemetry::TelemetryCollector collector("./telemetry_logs");
     WebTelemetryHelper webHelper(collector);
-    Web web(webHelper);
 
-    std::atomic<bool> running{true};
+    std::atomic<bool> running{ true };
     std::thread telemetryThread([&]() {
         int ticks = 0;
         while (running.load()) {
@@ -22,12 +23,15 @@ int main() {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     });
-    auto webThread = std::thread([&]() {
-        web.Start(8080);
-	});
-   
+    Web web(webHelper);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::thread webThread([&]()
+        {
+            web.Start("0.0.0.0", 8080);
+        });
 
+	telemetryThread.join();
 	webThread.join();
-    telemetryThread.join();
+
     return 0;
 }

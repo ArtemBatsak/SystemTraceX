@@ -26,6 +26,7 @@ namespace GPU {
     // independent subsystems (DXGI adapters, PDH GPU engine counters, and potentially
     // D3D-based memory queries in the future).
     static std::mutex g_mutex;
+    static std::mutex g_init_mutex;
 
     static PDH_HQUERY g_query = nullptr;
     static std::vector<PDH_HCOUNTER> g_counters;
@@ -36,19 +37,18 @@ namespace GPU {
     // Vendor detect
     // ------------------------------------------------------------
 
-    static Vendor DetectVendor(const std::wstring& name) {
+    static std::string DetectVendor(const std::wstring& name) {
 
         if (name.find(L"NVIDIA") != std::wstring::npos)
-            return Vendor::Nvidia;
+            return "Nvidia";
 
         if (name.find(L"AMD") != std::wstring::npos ||
             name.find(L"Radeon") != std::wstring::npos)
-            return Vendor::AMD;
-
+            return "AMD";
         if (name.find(L"Intel") != std::wstring::npos)
-            return Vendor::Intel;
+            return "Intel";
 
-        return Vendor::Unknown;
+        return "Unknown";
     }
 
     // ------------------------------------------------------------
@@ -92,9 +92,7 @@ namespace GPU {
             gpu.vramTotalBytes =
                 static_cast<uint64_t>(desc.DedicatedVideoMemory);
 
-            gpu.isIntegrated =
-                (gpu.vendor == Vendor::Intel ||
-                    gpu.vramTotalBytes < (1ULL << 30));
+            gpu.isIntegrated = (gpu.vramTotalBytes < (1ULL << 30));
 
             gpu.valid = true;
 
@@ -105,10 +103,11 @@ namespace GPU {
 
         factory->Release();
 
-        std::lock_guard<std::mutex> lock(g_mutex);
-
-        g_snapshot.gpus = std::move(result);
-        g_snapshot.count = static_cast<int>(g_snapshot.gpus.size());
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_snapshot.gpus = std::move(result);
+            g_snapshot.count = static_cast<int>(g_snapshot.gpus.size());
+        }
     }
 
     // ------------------------------------------------------------
@@ -211,6 +210,11 @@ namespace GPU {
         if (g_initialized)
             return;
 
+        std::lock_guard<std::mutex> lock(g_init_mutex);
+
+        if (g_initialized)
+            return;
+
         DetectGpus();
         InitPdh();
 
@@ -277,19 +281,18 @@ namespace GPU {
     // vendor detect (simple string match)
     // ------------------------------------------------------------
 
-    static Vendor DetectVendor(const std::string& name) {
+    static std::string DetectVendor(const std::string& name) {
 
         if (name.find("NVIDIA") != std::string::npos)
-            return Vendor::Nvidia;
+            return "Nvidia";
 
         if (name.find("AMD") != std::string::npos ||
             name.find("Radeon") != std::string::npos)
-            return Vendor::AMD;
-
+            return "AMD";
         if (name.find("Intel") != std::string::npos)
-            return Vendor::Intel;
+            return "Intel";
 
-        return Vendor::Unknown;
+        return "Unknown";
     }
 
     // ------------------------------------------------------------
@@ -378,19 +381,18 @@ namespace GPU {
             gpu.usagePercent = GetGpuUsage(i);
 
             // integrated detection (simple heuristic)
-            gpu.isIntegrated =
-                (gpu.vendor == Vendor::Intel ||
-                    gpu.vramTotalBytes == 0);
+            gpu.isIntegrated = (gpu.vramTotalBytes == 0);
 
             gpu.valid = true;
 
             result.push_back(gpu);
         }
 
-        std::lock_guard<std::mutex> lock(g_mutex);
-
-        g_snapshot.gpus = std::move(result);
-        g_snapshot.count = static_cast<int>(g_snapshot.gpus.size());
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_snapshot.gpus = std::move(result);
+            g_snapshot.count = static_cast<int>(g_snapshot.gpus.size());
+        }
     }
 
     // ------------------------------------------------------------
@@ -405,7 +407,8 @@ namespace GPU {
         DetectGpus(); // safe for Linux (light sysfs reads)
     }
 
-    GpuSnapshot GetSnapshots() {
+    const GpuSnapshot& GetSnapshots() {
+
         std::lock_guard<std::mutex> lock(g_mutex);
         return g_snapshot;
     }

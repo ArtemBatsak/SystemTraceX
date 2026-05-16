@@ -1,368 +1,426 @@
 #include "web.h"
 
-#include <iostream>
-#include <thread>
-#include <mutex>
-#include <chrono>
-
-// =========================
-// Constructor
-// =========================
-Web::Web(WebTelemetryHelper& helper)
-    : helper_(helper)
+#include <sstream>
+#include <fstream>
+Web::Web(WebTelemetryHelper& webHelper_)
+    : webHelper(webHelper_)
 {
+    svr = std::make_unique<httplib::Server>();
 }
 
-// =========================
-// START SERVER
-// =========================
-void Web::Start(int port)
+void Web::Start(const std::string& host, int port)
 {
-    SetupRoutes();
+    // ---------------- HTML ----------------
 
-    // запускаем telemetry thread
-    std::thread([this]() {
-        while (true)
+    svr->Get("/", [this](const httplib::Request&, httplib::Response& res)
         {
-            Cache newCache;
+            res.set_content(ReadFile("web/index.html"), "text/html; charset=utf-8");
+        });
+    svr->Get("/style.css", [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(ReadFile("web/style.css"), "text/css; charset=utf-8");
+        });
+    svr->Get("/app.js", [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(ReadFile("web/app.js"), "application/javascript; charset=utf-8");
+        });
 
-            newCache.current = helper_.GetCurrentSnapshot();
-            newCache.live = helper_.GetLiveGraphBootstrap();
-            newCache.h24 = helper_.Get24HoursSeries();
-            newCache.longSeries = helper_.GetLongRangeSeries();
-            newCache.sessions = helper_.GetSessionHistory();
+    // ---------------- API ----------------
 
+    svr->Get("/api/snapshot",
+        [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(BuildSnapshotJson(), "application/json");
+        });
+    svr->Get("/api/telemetry/24h",
+        [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(
+                BuildAggregatedSeriesJson(webHelper.Get24HoursSeries()).dump(),
+                "application/json");
+        });
+
+    svr->Get("/api/telemetry/long",
+        [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(
+                BuildAggregatedSeriesJson(webHelper.GetLongRangeSeries()).dump(),
+                "application/json");
+        });
+    svr->Get("/api/telemetry/sessions",
+        [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(
+                BuildSessionHistoryJson(webHelper.GetSessionHistory()).dump(),
+                "application/json");
+        });
+    svr->Get("/api/telemetry/live",
+        [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(
+                BuildLiveSeriesJson(webHelper.GetLiveGraphBootstrap()).dump(),
+                "application/json");
+        });
+
+    svr->listen(host.c_str(), port);
+}
+
+void Web::Stop()
+{
+    svr->stop();
+}
+
+std::string Web::BuildSnapshotJson()
+{
+    auto snapshot = webHelper.GetCurrentSnapshot();
+
+    const auto& cpu = snapshot.cpu;
+    const auto& gpu = snapshot.gpu;
+    const auto& ram = snapshot.memory;
+    const auto& net = snapshot.network;
+    const auto& system = snapshot.system;
+	const auto& disk = snapshot.disk;
+
+
+    json j;
+
+    // ---------------- CPU ----------------
+    j["cpu"] = {
+        {"usage", cpu.totalUsage},
+        {"name", cpu.cpuname}
+    };
+
+    // ---------------- RAM ----------------
+    j["ram"] = {
+        {"total", ram.totalRAM},
+        {"used", ram.usedRAM},
+        {"free", ram.freeRAM}
+    };
+
+    // ---------------- GPU ----------------
+    j["gpus"] = json::array();
+
+    for (const auto& g : gpu.gpus)
+    {
+        j["gpus"].push_back({
+            {"name", g.name},
+            {"usage", g.usagePercent},
+            {"vramTotal", g.vramTotalBytes},
+            {"vramUsed", g.vramUsedBytes}
+            });
+    }
+
+    // ---------------- NETWORK ----------------
+    j["network"] = {
+        {"rx", net.totalRxPerSec},
+        {"tx", net.totalTxPerSec}
+    };
+
+    // ---------------- INTERFACES ----------------
+    j["network"]["interfaces"] = json::array();
+
+    for (const auto& iface : net.interfaces)
+    {
+        if (iface.ipv4.empty())
+            continue;
+
+        j["network"]["interfaces"].push_back({
+            {"name", iface.name},
+            {"ipv4", iface.ipv4},
+            {"rx", iface.rxBytesPerSec},
+            {"tx", iface.txBytesPerSec},
+            {"rxTotal", iface.rxTotalBytes},
+            {"txTotal", iface.txTotalBytes},
+            {"isLoopback", iface.isLoopback},
+            {"isUp", iface.isUp}
+            });
+    }
+
+    // ---------------- SYSTEM ----------------
+    j["system"] = {
+    {"hostname", system.hostname},
+    {"os", system.osName},
+    {"uptime", system.uptimeSeconds},
+    {"kernel", system.kernelVersion},
+    {"arch", system.architecture},
+    {"virtualization", {
+        {"runningInVM", system.virtualization.runningInVM},
+        {"vendor", system.virtualization.vendor}
+    }}
+    };
+	//----------------- DISKS ----------------
+	j["disks"] = json::array();
+	for (const auto& d : disk.disks)
+    {
+        j["disks"].push_back({
+            {"name", d.name},
+            {"total", d.totalBytes},
+            {"free", d.freeBytes},
+            {"used", d.totalBytes - d.freeBytes}
+            });
+    }
+    return j.dump();
+}
+
+static json BuildAggregatedSeriesJson(
+    const std::vector<Telemetry::AggregatedSnapshot>& data)
+{
+    json j = json::array();
+
+    for (const auto& s : data)
+    {
+        j.push_back({
+
+            // ---------------- TIME ----------------
+
+            {"start", s.windowStartMs},
+            {"end", s.windowEndMs},
+            {"duration", s.sessionDurationMs},
+
+            // ---------------- CPU ----------------
+
+            {"cpu", {
+                {"avg", s.cpuAvg},
+                {"min", s.cpuMin},
+                {"max", s.cpuMax}
+            }},
+
+            // ---------------- GPU ----------------
+
+            {"gpu", {
+                {"avg", s.gpuAvg},
+                {"min", s.gpuMin},
+                {"max", s.gpuMax}
+            }},
+
+            // ---------------- RAM ----------------
+
+            {"ram", {
+                {"percentAvg", s.ramPercentAvg},
+
+                {"usedAvg", s.ramUsedAvg},
+                {"usedMin", s.ramUsedMin},
+                {"usedMax", s.ramUsedMax}
+            }},
+
+            // ---------------- DISK ----------------
+
+            {"disk", {
+                {"percentAvg", s.diskPercentAvg}
+            }},
+
+            // ---------------- NETWORK ----------------
+
+            {"network", {
+
+                {"rx", {
+                    {"avg", s.netRxAvg},
+                    {"min", s.netRxMin},
+                    {"max", s.netRxMax}
+                }},
+
+                {"tx", {
+                    {"avg", s.netTxAvg},
+                    {"min", s.netTxMin},
+                    {"max", s.netTxMax}
+                }}
+
+            }}
+            });
+    }
+
+    return j;
+}
+static json BuildLiveSeriesJson(
+    const std::vector<Telemetry::Snapshot>& data)
+{
+    json j = json::array();
+
+    for (const auto& s : data)
+    {
+        // ---------------- GPU ----------------
+
+        double gpuUsage = 0.0;
+
+        if (!s.gpu.gpus.empty())
+        {
+            for (const auto& g : s.gpu.gpus)
+                gpuUsage += g.usagePercent;
+
+            gpuUsage /= static_cast<double>(s.gpu.gpus.size());
+        }
+
+        // ---------------- DISK TOTAL ----------------
+
+        uint64_t diskTotal = 0;
+        uint64_t diskFree = 0;
+
+        for (const auto& d : s.disk.disks)
+        {
+            diskTotal += d.totalBytes;
+            diskFree += d.freeBytes;
+        }
+
+        double diskPercent = 0.0;
+
+        if (diskTotal > 0)
+        {
+            diskPercent =
+                100.0 *
+                static_cast<double>(diskTotal - diskFree) /
+                static_cast<double>(diskTotal);
+        }
+
+        // ---------------- ROOT OBJECT ----------------
+
+        json entry = {
+
+            // ---------------- TIME ----------------
+
+            {"t", s.timestampMs},
+
+            // ---------------- CPU ----------------
+
+            {"cpu", s.cpu.totalUsage},
+
+            // ---------------- GPU ----------------
+
+            {"gpu", gpuUsage},
+
+            // ---------------- RAM ----------------
+
+            {"ram", {
+                {"used", s.memory.usedRAM},
+                {"total", s.memory.totalRAM},
+                {"percent",
+                    s.memory.totalRAM > 0
+                    ? 100.0 *
+                      static_cast<double>(s.memory.usedRAM) /
+                      static_cast<double>(s.memory.totalRAM)
+                    : 0.0
+                }
+            }},
+
+            // ---------------- DISK TOTAL ----------------
+
+            {"disk", {
+                {"percent", diskPercent}
+            }},
+
+            // ---------------- NETWORK ----------------
+
+            {"network", {
+                {"rx", s.network.totalRxPerSec},
+                {"tx", s.network.totalTxPerSec}
+            }}
+        };
+
+        // ---------------- PER DISK ----------------
+
+        entry["disks"] = json::array();
+
+        for (const auto& d : s.disk.disks)
+        {
+            double percent = 0.0;
+
+            if (d.totalBytes > 0)
             {
-                std::lock_guard<std::mutex> lock(cache_mtx_);
-                cache_ = std::move(newCache);
+                percent =
+                    100.0 *
+                    static_cast<double>(d.totalBytes - d.freeBytes) /
+                    static_cast<double>(d.totalBytes);
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            entry["disks"].push_back({
+
+                {"name", d.name},
+
+                {"total", d.totalBytes},
+                {"free", d.freeBytes},
+                {"used", d.totalBytes - d.freeBytes},
+
+                {"percent", percent}
+                });
         }
-        }).detach();
 
-    std::cout << "Server started on port " << port << std::endl;
-
-    svr_.listen("0.0.0.0", port);
-}
-
-// =========================
-// ROUTES
-// =========================
-void Web::SetupRoutes()
-{
-    svr_.Get("/", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content(GetIndexHtml(), "text/html; charset=utf-8");
-        });
-
-    svr_.Get("/style.css", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content(GetStyleCss(), "text/css; charset=utf-8");
-        });
-
-    svr_.Get("/app.js", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content(GetAppJs(), "application/javascript; charset=utf-8");
-        });
-
-    svr_.Get("/api/current", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content(GetCurrentSnapshotJson(), "application/json");
-        });
-
-    svr_.Get("/api/history/live", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content(GetLiveHistoryJson(), "application/json");
-        });
-
-    svr_.Get("/api/history/24h", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content(Get24HoursHistoryJson(), "application/json");
-        });
-
-    svr_.Get("/api/history/long", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content(GetLongHistoryJson(), "application/json");
-        });
-
-    svr_.Get("/api/history/sessions", [&](const httplib::Request&, httplib::Response& res) {
-        res.set_content(GetSessionHistoryJson(), "application/json");
-        });
-}
-
-// =========================
-// HTML / CSS / JS
-// =========================
-std::string Web::GetIndexHtml() const
-{
-    return R"HTML(
-<html>
-<head>
-    <link rel='stylesheet' href='/style.css'>
-</head>
-<body>
-    <button id='burger'>☰</button>
-
-    <aside id='menu' class='menu'>
-        <h3>Снапшоты</h3>
-        <ul>
-            <li>CPU</li>
-            <li>GPU</li>
-            <li>NET</li>
-            <li>RAM</li>
-            <li>DISK</li>
-        </ul>
-
-        <label><input id='liveToggle' type='checkbox' checked> Live graph</label>
-        <label><input id='h24Toggle' type='checkbox' checked> 24h graph</label>
-        <label><input id='longToggle' type='checkbox' checked> Long graph</label>
-    </aside>
-
-    <main>
-        <div id='liveChart' class='chart'></div>
-        <div id='h24Chart' class='chart'></div>
-        <div id='longChart' class='chart'></div>
-    </main>
-
-    <script src='https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js'></script>
-    <script src='/app.js'></script>
-</body>
-</html>
-)HTML";
-}
-
-std::string Web::GetStyleCss() const
-{
-    return R"CSS(
-body{
-    margin:0;
-    background:#111827;
-    color:#e5e7eb;
-    font-family:Arial;
-}
-
-#burger{
-    position:fixed;
-    left:10px;
-    top:10px;
-    z-index:5;
-}
-
-.menu{
-    position:fixed;
-    left:-260px;
-    top:0;
-    width:240px;
-    height:100vh;
-    background:#1f2937;
-    padding:20px;
-    transition:.2s;
-}
-
-.menu.open{
-    left:0;
-}
-
-.chart{
-    height:280px;
-    margin:18px 20px;
-    background:#1f2937;
-    border-radius:12px;
-}
-)CSS";
-}
-
-std::string Web::GetAppJs() const
-{
-    return R"JS(
-const menu = document.getElementById('menu');
-document.getElementById('burger').onclick = () =>
-    menu.classList.toggle('open');
-
-const liveChart = echarts.init(document.getElementById('liveChart'));
-const h24Chart  = echarts.init(document.getElementById('h24Chart'));
-const longChart = echarts.init(document.getElementById('longChart'));
-
-const pct = v => Math.max(0, Math.min(100, v));
-const time = v => new Date(v).toLocaleTimeString();
-
-async function j(u){ return (await fetch(u)).json(); }
-
-function draw(c, x, series){
-    c.setOption({
-        tooltip:{trigger:'axis'},
-        xAxis:{type:'category', data:x},
-        yAxis:{type:'value', min:0, max:100},
-        series
-    });
-}
-
-async function refreshLive(){
-    const d = await j('/api/history/live');
-
-    draw(liveChart,
-        d.map(r => time(r.timestampMs)),
-        [
-            {name:'CPU', type:'line', data:d.map(r=>pct(r.cpu.totalUsage))},
-            {name:'GPU', type:'line', data:d.map(r=>pct((r.gpu.gpus[0]||{usagePercent:0}).usagePercent))},
-            {name:'RAM', type:'line', data:d.map(r=>pct((r.memory.usedRAM*100)/Math.max(1,r.memory.totalRAM)))}
-        ]
-    );
-}
-
-function agg(d){
-    return {
-        x: d.map(r=>time(r.windowEndMs)),
-        cpu: d.map(r=>pct(r.cpuAvg)),
-        gpu: d.map(r=>pct(r.gpuAvg)),
-        ram: d.map(r=>pct(r.ramPercentAvg)),
-        disk: d.map(r=>pct(r.diskPercentAvg))
-    };
-}
-
-async function refreshHistory(){
-    const h = agg(await j('/api/history/24h'));
-
-    draw(h24Chart, h.x, [
-        {name:'CPU', type:'line', data:h.cpu},
-        {name:'GPU', type:'line', data:h.gpu},
-        {name:'RAM', type:'line', data:h.ram},
-        {name:'DISK', type:'line', data:h.disk}
-    ]);
-
-    const l = agg(await j('/api/history/long'));
-
-    draw(longChart, l.x, [
-        {name:'CPU', type:'line', data:l.cpu},
-        {name:'GPU', type:'line', data:l.gpu},
-        {name:'RAM', type:'line', data:l.ram},
-        {name:'DISK', type:'line', data:l.disk}
-    ]);
-}
-
-function bindToggle(id, el){
-    document.getElementById(id).onchange = e =>
-        el.style.display = e.target.checked ? 'block' : 'none';
-}
-
-bindToggle('liveToggle', document.getElementById('liveChart'));
-bindToggle('h24Toggle', document.getElementById('h24Chart'));
-bindToggle('longToggle', document.getElementById('longChart'));
-
-setInterval(refreshLive, 1000);
-setInterval(refreshHistory, 1000);
-
-refreshLive();
-refreshHistory();
-)JS";
-}
-
-// =========================
-// JSON API (CACHE SAFE)
-// =========================
-std::string Web::GetCurrentSnapshotJson() const
-{
-    std::lock_guard<std::mutex> lock(cache_mtx_);
-    return BuildSnapshotJson(cache_.current);
-}
-
-std::string Web::GetLiveHistoryJson() const
-{
-    std::lock_guard<std::mutex> lock(cache_mtx_);
-    return BuildLiveSeriesJson(cache_.live);
-}
-
-std::string Web::Get24HoursHistoryJson() const
-{
-    std::lock_guard<std::mutex> lock(cache_mtx_);
-    return BuildAggregatedSeriesJson(cache_.h24);
-}
-
-std::string Web::GetLongHistoryJson() const
-{
-    std::lock_guard<std::mutex> lock(cache_mtx_);
-    return BuildAggregatedSeriesJson(cache_.longSeries);
-}
-
-std::string Web::GetSessionHistoryJson() const
-{
-    std::lock_guard<std::mutex> lock(cache_mtx_);
-    return BuildSessionHistoryJson(cache_.sessions);
-}
-
-
-
-std::string Web::BuildSnapshotJson(const Telemetry::Snapshot& s) const
-{
-    std::ostringstream oss;
-
-    oss << "{"
-        << "\"timestampMs\":" << s.timestampMs
-        << ",\"cpu\":{\"totalUsage\":" << s.cpu.totalUsage << "}"
-        << ",\"memory\":{\"totalRAM\":" << s.memory.totalRAM
-        << ",\"usedRAM\":" << s.memory.usedRAM << "}"
-        << ",\"gpu\":{\"gpus\":[";
-
-    for (size_t i = 0; i < s.gpu.gpus.size(); ++i)
-    {
-        if (i) oss << ",";
-        oss << "{\"usagePercent\":" << s.gpu.gpus[i].usagePercent << "}";
+        j.push_back(entry);
     }
 
-    oss << "]}}";
-    return oss.str();
+    return j;
 }
-
-
-std::string Web::BuildAggregatedSeriesJson(
-    const std::vector<Telemetry::AggregatedSnapshot>& series) const
+static json BuildSessionHistoryJson(
+    const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions)
 {
-    std::ostringstream oss;
-    oss << "[";
+    json out = json::array();
 
-    for (size_t i = 0; i < series.size(); ++i)
+    for (const auto& session : sessions)
     {
-        const auto& e = series[i];
-        if (i) oss << ",";
+        if (session.empty())
+            continue;
 
-        oss << "{"
-            << "\"recordType\":" << (int)e.recordType
-            << ",\"windowEndMs\":" << e.windowEndMs
-            << ",\"cpuAvg\":" << e.cpuAvg
-            << ",\"gpuAvg\":" << e.gpuAvg
-            << ",\"ramPercentAvg\":" << e.ramPercentAvg
-            << ",\"diskPercentAvg\":" << e.diskPercentAvg
-            << "}";
+        json metrics = json::array();
+
+        uint64_t start = 0;
+        uint64_t end = 0;
+        uint64_t duration = 0;
+
+        for (const auto& s : session)
+        {
+            // SESSION START
+            if (s.recordType ==
+                Telemetry::AggregatedRecordType::SessionStart)
+            {
+                start = s.windowStartMs;
+                continue;
+            }
+
+            // SESSION END
+            if (s.recordType ==
+                Telemetry::AggregatedRecordType::SessionEnd)
+            {
+                end = s.windowEndMs;
+                duration = s.sessionDurationMs;
+                continue;
+            }
+
+            // REAL METRICS
+            metrics.push_back({
+
+                {"start", s.windowStartMs},
+                {"end", s.windowEndMs},
+
+                {"cpu", {
+                    {"avg", s.cpuAvg},
+                    {"min", s.cpuMin},
+                    {"max", s.cpuMax}
+                }},
+
+                {"gpu", {
+                    {"avg", s.gpuAvg},
+                    {"min", s.gpuMin},
+                    {"max", s.gpuMax}
+                }},
+
+                {"ram", {
+                    {"percentAvg", s.ramPercentAvg}
+                }},
+
+                {"network", {
+                    {"rx", s.netRxAvg},
+                    {"tx", s.netTxAvg}
+                }}
+                });
+        }
+
+        out.push_back({
+
+            {"start", start},
+            {"end", end},
+            {"duration", duration},
+
+            {"data", metrics}
+            });
     }
 
-    oss << "]";
-    return oss.str();
-}
-
-std::string Web::BuildLiveSeriesJson(
-    const std::vector<Telemetry::Snapshot>& series) const
-{
-    std::ostringstream oss;
-    oss << "[";
-
-    for (size_t i = 0; i < series.size(); ++i)
-    {
-        if (i) oss << ",";
-        oss << BuildSnapshotJson(series[i]);
-    }
-
-    oss << "]";
-    return oss.str();
-}
-
-
-std::string Web::BuildSessionHistoryJson(
-    const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions) const
-{
-    std::ostringstream oss;
-    oss << "[";
-
-    for (size_t i = 0; i < sessions.size(); ++i)
-    {
-        if (i) oss << ",";
-        oss << BuildAggregatedSeriesJson(sessions[i]);
-    }
-
-    oss << "]";
-
-    return oss.str();
+    return out;
 }

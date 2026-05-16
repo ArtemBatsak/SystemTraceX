@@ -1,5 +1,4 @@
 #include "collector.h"
-
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -26,18 +25,18 @@ TelemetryCollector::~TelemetryCollector() {
 }
 
 Snapshot TelemetryCollector::CollectRawSnapshot() {
-    Snapshot snapshot;
-    snapshot.timestampMs = NowMs();
-    CPU::Update();
+	Snapshot snapshot;
+	snapshot.timestampMs = NowMs();
+	CPU::Update();
 	GPU::Update();
-    snapshot.cpu = CPU::GetSnapshot();
-    snapshot.gpu = GPU::GetSnapshots();
-    snapshot.memory = Memory::GetSnapshot();
-    snapshot.disk = Disk::GetSnapshot();
-    snapshot.network = Net::GetSnapshot();
-    snapshot.system = SystemInfo::GetSnapshot();
-   
-    return snapshot;
+	snapshot.cpu = CPU::GetSnapshot();
+	snapshot.gpu = GPU::GetSnapshots();
+	snapshot.memory = Memory::GetSnapshot();
+	snapshot.disk = Disk::GetSnapshot();
+	snapshot.network = Net::GetSnapshot();
+	snapshot.system = SystemInfo::GetSnapshot();
+
+	return snapshot;
 }
 
 void TelemetryCollector::PushLiveSnapshot(Snapshot snapshot) {

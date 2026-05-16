@@ -1,66 +1,52 @@
 #pragma once
 
 #include <string>
-#include <vector>
-#include <mutex>
-#include <memory>
-
+#include <sstream>
 #include "httplib.h"
-#include "web_helper.h"
+#include "web_helper.h" // твой Snapshot + helper
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <memory>
+#include <mutex>
 
-// =========================
-// Web server + telemetry UI
-// =========================
-class Web {
+using json = nlohmann::json;
+
+class Web
+{
 public:
-    explicit Web(WebTelemetryHelper& helper);
+    explicit Web(WebTelemetryHelper& webHelper_);
 
-    void Start(int port);
+    void Start(const std::string& host = "0.0.0.0", int port = 8080);
+    void Stop();
 
 private:
-    void SetupRoutes();
-
-    // =========================
-    // UI
-    // =========================
+    std::string BuildSnapshotJson();
     std::string GetIndexHtml() const;
-    std::string GetStyleCss() const;
     std::string GetAppJs() const;
-
-    // =========================
-    // API JSON
-    // =========================
-    std::string GetCurrentSnapshotJson() const;
-    std::string GetLiveHistoryJson() const;
-    std::string Get24HoursHistoryJson() const;
-    std::string GetLongHistoryJson() const;
-    std::string GetSessionHistoryJson() const;
-
-    // =========================
-    // JSON builders
-    // (они у тебя уже в cpp)
-    // =========================
-    std::string BuildSnapshotJson(const Telemetry::Snapshot& s) const;
-    std::string BuildAggregatedSeriesJson(const std::vector<Telemetry::AggregatedSnapshot>& series) const;
-    std::string BuildLiveSeriesJson(const std::vector<Telemetry::Snapshot>& series) const;
-    std::string BuildSessionHistoryJson(const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions) const;
+	std::string GetStylesCss() const;
 
 private:
-    WebTelemetryHelper& helper_;
+    WebTelemetryHelper& webHelper;
 
-    httplib::Server svr_;
-
-    // =========================
-    // CACHE (shared with telemetry thread)
-    // =========================
-    struct Cache {
-        Telemetry::Snapshot current;
-        std::vector<Telemetry::Snapshot> live;
-        std::vector<Telemetry::AggregatedSnapshot> h24;
-        std::vector<Telemetry::AggregatedSnapshot> longSeries;
-        std::vector<std::vector<Telemetry::AggregatedSnapshot>> sessions;
-    };
-
-    Cache cache_;
-    mutable std::mutex cache_mtx_;
+    std::unique_ptr<httplib::Server> svr;
 };
+
+static json BuildAggregatedSeriesJson(
+    const std::vector<Telemetry::AggregatedSnapshot>& data);
+static json BuildLiveSeriesJson(
+    const std::vector<Telemetry::Snapshot>& data);
+static json BuildSessionHistoryJson(
+    const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions);
+
+static std::string ReadFile(const std::string& path)
+{
+    std::ifstream file(path, std::ios::binary);
+
+    if (!file.is_open())
+        return "";
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+
+    return buffer.str();
+}

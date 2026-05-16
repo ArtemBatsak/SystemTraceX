@@ -5,14 +5,8 @@
 #include <cstdint>
 
 namespace GPU {
-
-    enum class Vendor {
-        Unknown,
-        Nvidia,
-        AMD,
-        Intel
-    };
     struct GpuInfo {
+
         std::string name;
 
         uint64_t vramTotalBytes = 0;
@@ -20,7 +14,7 @@ namespace GPU {
 
         float usagePercent = 0.0f;     // можно оставить 0 пока
 
-        Vendor vendor = Vendor::Unknown;
+        std::string vendor = "Unknown";
 
         bool isIntegrated = false;
         bool valid = false;
@@ -32,8 +26,8 @@ namespace GPU {
 
     };
 
-    void Init();
+	void Init();
 	void Update();
-    GpuSnapshot GetSnapshots();
+	GpuSnapshot GetSnapshots();
 
 }
