@@ -20,7 +20,6 @@ public:
     void Stop();
 
 private:
-    std::string BuildSnapshotJson();
     std::string GetIndexHtml() const;
     std::string GetAppJs() const;
 	std::string GetStylesCss() const;
@@ -31,11 +30,11 @@ private:
     std::unique_ptr<httplib::Server> svr;
 };
 
-static json BuildAggregatedSeriesJson(
+json BuildAggregatedSeriesJson(
     const std::vector<Telemetry::AggregatedSnapshot>& data);
-static json BuildLiveSeriesJson(
+json BuildLiveSeriesJson(
     const std::vector<Telemetry::Snapshot>& data);
-static json BuildSessionHistoryJson(
+json BuildSessionHistoryJson(
     const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions);
 
 static std::string ReadFile(const std::string& path)

@@ -20,7 +20,16 @@ int main() {
             ++ticks;
             if (ticks % 10 == 0) collector.FlushTenSecondAggregation();
             if (ticks % 60 == 0) collector.FlushMinuteAggregation();
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+			std::cout << "Collected snapshot at " << ticks << " seconds" << std::endl;
+			
+            if (ticks <= 120) { 
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			}
+            else {
+                std::cout << "seconds:" << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count() << std::endl;
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+			}
+
         }
     });
     Web web(webHelper);

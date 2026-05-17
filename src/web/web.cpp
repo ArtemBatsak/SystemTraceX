@@ -2,10 +2,12 @@
 
 #include <sstream>
 #include <fstream>
+
 Web::Web(WebTelemetryHelper& webHelper_)
     : webHelper(webHelper_)
 {
     svr = std::make_unique<httplib::Server>();
+    webHelper.StartBackground();
 }
 
 void Web::Start(const std::string& host, int port)
@@ -30,36 +32,28 @@ void Web::Start(const std::string& host, int port)
     svr->Get("/api/snapshot",
         [this](const httplib::Request&, httplib::Response& res)
         {
-            res.set_content(BuildSnapshotJson(), "application/json");
+            res.set_content(webHelper.GetSnapshotJson().dump(), "application/json");
         });
     svr->Get("/api/telemetry/24h",
         [this](const httplib::Request&, httplib::Response& res)
         {
-            res.set_content(
-                BuildAggregatedSeriesJson(webHelper.Get24HoursSeries()).dump(),
-                "application/json");
+            res.set_content(webHelper.Get24HoursJson().dump(), "application/json");
         });
 
     svr->Get("/api/telemetry/long",
         [this](const httplib::Request&, httplib::Response& res)
         {
-            res.set_content(
-                BuildAggregatedSeriesJson(webHelper.GetLongRangeSeries()).dump(),
-                "application/json");
+            res.set_content(webHelper.GetLongRangeJson().dump(), "application/json");
         });
     svr->Get("/api/telemetry/sessions",
         [this](const httplib::Request&, httplib::Response& res)
         {
-            res.set_content(
-                BuildSessionHistoryJson(webHelper.GetSessionHistory()).dump(),
-                "application/json");
+            res.set_content(webHelper.GetSessionHistoryJson().dump(), "application/json");
         });
     svr->Get("/api/telemetry/live",
         [this](const httplib::Request&, httplib::Response& res)
         {
-            res.set_content(
-                BuildLiveSeriesJson(webHelper.GetLiveGraphBootstrap()).dump(),
-                "application/json");
+            res.set_content(webHelper.GetLiveJson().dump(), "application/json");
         });
 
     svr->listen(host.c_str(), port);
@@ -67,102 +61,13 @@ void Web::Start(const std::string& host, int port)
 
 void Web::Stop()
 {
+    webHelper.StopBackground();
     svr->stop();
 }
 
-std::string Web::BuildSnapshotJson()
-{
-    auto snapshot = webHelper.GetCurrentSnapshot();
-
-    const auto& cpu = snapshot.cpu;
-    const auto& gpu = snapshot.gpu;
-    const auto& ram = snapshot.memory;
-    const auto& net = snapshot.network;
-    const auto& system = snapshot.system;
-	const auto& disk = snapshot.disk;
 
 
-    json j;
-
-    // ---------------- CPU ----------------
-    j["cpu"] = {
-        {"usage", cpu.totalUsage},
-        {"name", cpu.cpuname}
-    };
-
-    // ---------------- RAM ----------------
-    j["ram"] = {
-        {"total", ram.totalRAM},
-        {"used", ram.usedRAM},
-        {"free", ram.freeRAM}
-    };
-
-    // ---------------- GPU ----------------
-    j["gpus"] = json::array();
-
-    for (const auto& g : gpu.gpus)
-    {
-        j["gpus"].push_back({
-            {"name", g.name},
-            {"usage", g.usagePercent},
-            {"vramTotal", g.vramTotalBytes},
-            {"vramUsed", g.vramUsedBytes}
-            });
-    }
-
-    // ---------------- NETWORK ----------------
-    j["network"] = {
-        {"rx", net.totalRxPerSec},
-        {"tx", net.totalTxPerSec}
-    };
-
-    // ---------------- INTERFACES ----------------
-    j["network"]["interfaces"] = json::array();
-
-    for (const auto& iface : net.interfaces)
-    {
-        if (iface.ipv4.empty())
-            continue;
-
-        j["network"]["interfaces"].push_back({
-            {"name", iface.name},
-            {"ipv4", iface.ipv4},
-            {"rx", iface.rxBytesPerSec},
-            {"tx", iface.txBytesPerSec},
-            {"rxTotal", iface.rxTotalBytes},
-            {"txTotal", iface.txTotalBytes},
-            {"isLoopback", iface.isLoopback},
-            {"isUp", iface.isUp}
-            });
-    }
-
-    // ---------------- SYSTEM ----------------
-    j["system"] = {
-    {"hostname", system.hostname},
-    {"os", system.osName},
-    {"uptime", system.uptimeSeconds},
-    {"kernel", system.kernelVersion},
-    {"arch", system.architecture},
-    {"virtualization", {
-        {"runningInVM", system.virtualization.runningInVM},
-        {"vendor", system.virtualization.vendor}
-    }}
-    };
-	//----------------- DISKS ----------------
-	j["disks"] = json::array();
-	for (const auto& d : disk.disks)
-    {
-        j["disks"].push_back({
-            {"name", d.name},
-            {"total", d.totalBytes},
-            {"free", d.freeBytes},
-            {"used", d.totalBytes - d.freeBytes}
-            });
-    }
-    return j.dump();
-}
-
-static json BuildAggregatedSeriesJson(
+json BuildAggregatedSeriesJson(
     const std::vector<Telemetry::AggregatedSnapshot>& data)
 {
     json j = json::array();
@@ -231,7 +136,7 @@ static json BuildAggregatedSeriesJson(
 
     return j;
 }
-static json BuildLiveSeriesJson(
+json BuildLiveSeriesJson(
     const std::vector<Telemetry::Snapshot>& data)
 {
     json j = json::array();
@@ -348,7 +253,7 @@ static json BuildLiveSeriesJson(
 
     return j;
 }
-static json BuildSessionHistoryJson(
+json BuildSessionHistoryJson(
     const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions)
 {
     json out = json::array();
