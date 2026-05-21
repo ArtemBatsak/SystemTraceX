@@ -6,6 +6,56 @@ const formatBytes = (bytes) => {
   return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
 };
 
+const formatTime = (ts) => {
+  if (!ts) return 'unknown-time';
+  return new Date(ts * 1000).toLocaleString();
+};
+
+const severityWeight = {
+  Critical: 4,
+  Error: 3,
+  Warning: 2,
+  Info: 1
+};
+
+function renderErrors(events) {
+  const errorsBody = document.getElementById('errors-body');
+  if (events.length === 0) {
+    errorsBody.textContent = 'Нет серьёзных ошибок и крашей.';
+    errorsBody.className = 'error-empty';
+    return;
+  }
+
+  const grouped = events.reduce((acc, e) => {
+    const key = e.source || 'Unknown';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(e);
+    return acc;
+  }, {});
+
+  const sourceBlocks = Object.entries(grouped)
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([source, srcEvents]) => {
+      srcEvents.sort((a, b) => (severityWeight[b.severity] || 0) - (severityWeight[a.severity] || 0));
+      const rows = srcEvents.map((e) => {
+        const badge = e.eventId ? `ID ${e.eventId}` : 'ID n/a';
+        return `<div class="error-row sev-${e.severity}">
+            <span class="sev-tag">${e.severity}</span>
+            <span class="err-time">${formatTime(e.timestamp)}</span>
+            <span class="err-id">${badge}</span>
+            <div class="err-msg">${e.message}</div>
+          </div>`;
+      }).join('');
+      return `<details class="error-group" open>
+          <summary>${source} <span class="count">(${srcEvents.length})</span></summary>
+          ${rows}
+        </details>`;
+    }).join('');
+
+  errorsBody.className = '';
+  errorsBody.innerHTML = sourceBlocks;
+}
+
 async function refreshTaskManager() {
   const [procRes, errRes] = await Promise.all([
     fetch('/api/processes'),
@@ -23,19 +73,10 @@ async function refreshTaskManager() {
     });
   }
 
-  const errorsBody = document.getElementById('errors-body');
   if (errRes.ok) {
     const data = await errRes.json();
     const events = data.lastEvents || [];
-    if (events.length === 0) {
-      errorsBody.textContent = 'Нет системных ошибок.';
-      errorsBody.className = 'error-empty';
-    } else {
-      errorsBody.className = '';
-      errorsBody.innerHTML = events.map((e) => {
-        return `<div class="sev-${e.severity}">[${e.severity}] ${e.source}: ${e.message} (eventId=${e.eventId})</div>`;
-      }).join('');
-    }
+    renderErrors(events);
   }
 }
 

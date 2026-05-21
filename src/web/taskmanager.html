@@ -18,6 +18,13 @@
     td:last-child,th:last-child{text-align:right}
     .error-empty{ color:var(--text-muted); font-style:italic; }
     .sev-Critical,.sev-Error{ color:var(--danger); }
+    .error-group{ border:1px solid var(--border-color); border-radius:10px; padding:8px 10px; margin-bottom:10px; background:rgba(255,255,255,0.02);}
+    .error-group summary{ cursor:pointer; font-weight:600; margin-bottom:8px; }
+    .count{ color:var(--text-muted); }
+    .error-row{ border-top:1px dashed rgba(255,255,255,0.08); padding:8px 0; }
+    .sev-tag{ font-weight:700; margin-right:8px; }
+    .err-time,.err-id{ color:var(--text-muted); margin-right:10px; font-size:.85rem; }
+    .err-msg{ margin-top:4px; white-space:pre-wrap; }
   </style>
 </head>
 <body>
@@ -35,7 +42,7 @@
   </div>
 
   <div class="card">
-    <h2>System Errors (ErrorSnapshot::GetSnapshot)</h2>
+    <h2>System Errors / Crash Detector (grouped by source)</h2>
     <div id="errors-body" class="error-empty">Загрузка...</div>
   </div>
 
