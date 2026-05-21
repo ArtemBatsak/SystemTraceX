@@ -17,6 +17,10 @@ void Web::Start(const std::string& host, int port)
         {
             res.set_content(ReadFile("web/index.html"), "text/html; charset=utf-8");
         });
+    svr->Get("/tasks", [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(ReadFile("web/taskmanager.html"), "text/html; charset=utf-8");
+        });
 
     /*
     svr->Get("/style.css", [this](const httplib::Request&, httplib::Response& res)
@@ -26,6 +30,10 @@ void Web::Start(const std::string& host, int port)
     svr->Get("/script.js", [this](const httplib::Request&, httplib::Response& res)
         {
             res.set_content(ReadFile("web/script.js"), "application/javascript; charset=utf-8");
+        });
+    svr->Get("/taskmanager.js", [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(ReadFile("web/taskmanager.js"), "application/javascript; charset=utf-8");
         });
     // ---------------- API ----------------
 
@@ -52,6 +60,16 @@ void Web::Start(const std::string& host, int port)
         {
             // ИЗМЕНЕНИЕ: используем GetLongRangeString() вместо вызова .dump()
             res.set_content(webHelper.GetAggregatedWindowString("long"), "application/json");
+        });
+    svr->Get("/api/processes",
+        [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(webHelper.GetProcessesString(), "application/json");
+        });
+    svr->Get("/api/errors",
+        [this](const httplib::Request&, httplib::Response& res)
+        {
+            res.set_content(webHelper.GetErrorsString(), "application/json");
         });
  
     svr->listen(host.c_str(), port);

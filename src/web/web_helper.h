@@ -17,6 +17,8 @@ public:
     std::string GetLiveWindowString();
     std::string GetAggregatedWindowString(std::string type);
     std::string GetSnapshotString();
+    std::string GetProcessesString();
+    std::string GetErrorsString();
 
 private:
     Telemetry::TelemetryCollector& collector_;

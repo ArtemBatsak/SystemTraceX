@@ -99,7 +99,7 @@ namespace Proc {
             return a.importanceScore > b.importanceScore;
             });
 
-        size_t count = (std::min)((size_t)20, allProcesses.size());
+        size_t count = (std::min)((size_t)40, allProcesses.size());
         snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
 
         return snap;
@@ -208,8 +208,8 @@ namespace Proc {
                 return a.importanceScore > b.importanceScore;
                 });
 
-            // Keep top 20 processes
-            size_t count = (std::min)((size_t)20, allProcesses.size());
+            // Keep top 40 processes
+            size_t count = (std::min)((size_t)40, allProcesses.size());
             snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
 
             // Periodically clear history to avoid keeping closed process entries
@@ -221,4 +221,3 @@ namespace Proc {
         }
     }
 #endif
-

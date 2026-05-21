@@ -5,6 +5,8 @@
 #include <sstream>
 #include <iomanip>
 #include <vector>
+#include "../collectors/process/process.h"
+#include "../collectors/errors/errors.h"
 
 WebTelemetryHelper::WebTelemetryHelper(Telemetry::TelemetryCollector& collector)
     : collector_(collector) {
@@ -276,5 +278,78 @@ std::string WebTelemetryHelper::GetAggregatedWindowString(std::string type)
     }
 
     ss << "]";
+    return ss.str();
+}
+
+std::string WebTelemetryHelper::GetProcessesString()
+{
+    auto processSnapshot = Proc::GetSnapshot();
+
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(6);
+    ss << "{\n";
+    ss << "  \"totalProcesses\": " << processSnapshot.totalProcesses << ",\n";
+    ss << "  \"topProcesses\": [\n";
+
+    const size_t limit = (std::min)(static_cast<size_t>(40), processSnapshot.topProcesses.size());
+    for (size_t i = 0; i < limit; ++i) {
+        const auto& p = processSnapshot.topProcesses[i];
+        ss << "    {\n"
+            << "      \"pid\": " << p.pid << ",\n"
+            << "      \"name\": \"" << EscapeJsonString(p.name) << "\",\n"
+            << "      \"cpuUsage\": " << p.cpuUsage << ",\n"
+            << "      \"memoryUsage\": " << p.memoryUsage << ",\n"
+            << "      \"importanceScore\": " << p.importanceScore << "\n"
+            << "    }" << (i + 1 < limit ? "," : "") << "\n";
+    }
+
+    ss << "  ]\n";
+    ss << "}";
+    return ss.str();
+}
+
+std::string WebTelemetryHelper::GetErrorsString()
+{
+    auto errorSnapshot = SystemErrors::GetSnapshot();
+
+    auto severityToString = [](SystemErrors::Severity severity) {
+        switch (severity) {
+        case SystemErrors::Severity::Critical: return "Critical";
+        case SystemErrors::Severity::Error: return "Error";
+        case SystemErrors::Severity::Warning: return "Warning";
+        case SystemErrors::Severity::Info: return "Info";
+        default: return "Unknown";
+        }
+    };
+
+    std::ostringstream ss;
+    ss << "{\n";
+    ss << "  \"lastEvents\": [\n";
+    for (size_t i = 0; i < errorSnapshot.lastEvents.size(); ++i) {
+        const auto& e = errorSnapshot.lastEvents[i];
+        ss << "    {\n"
+            << "      \"timestamp\": " << e.timestamp << ",\n"
+            << "      \"source\": \"" << EscapeJsonString(e.source) << "\",\n"
+            << "      \"severity\": \"" << severityToString(e.severity) << "\",\n"
+            << "      \"message\": \"" << EscapeJsonString(e.message) << "\",\n"
+            << "      \"eventId\": " << e.eventId << "\n"
+            << "    }" << (i + 1 < errorSnapshot.lastEvents.size() ? "," : "") << "\n";
+    }
+    ss << "  ],\n";
+
+    ss << "  \"criticalEvents\": [\n";
+    for (size_t i = 0; i < errorSnapshot.criticalEvents.size(); ++i) {
+        const auto& e = errorSnapshot.criticalEvents[i];
+        ss << "    {\n"
+            << "      \"timestamp\": " << e.timestamp << ",\n"
+            << "      \"source\": \"" << EscapeJsonString(e.source) << "\",\n"
+            << "      \"severity\": \"" << severityToString(e.severity) << "\",\n"
+            << "      \"message\": \"" << EscapeJsonString(e.message) << "\",\n"
+            << "      \"eventId\": " << e.eventId << "\n"
+            << "    }" << (i + 1 < errorSnapshot.criticalEvents.size() ? "," : "") << "\n";
+    }
+    ss << "  ]\n";
+    ss << "}";
+
     return ss.str();
 }
