@@ -7,11 +7,10 @@
 #include "src/collector/collector.h"
 #include "src/web/web.h"
 
-// Общие флаги и объекты для управления из разных потоков
-std::atomic<bool> running{ true };
-Web* globalWebPtr = nullptr; // Нужен Windows-процедуре, чтобы остановить httplib
 
-// Функция с логикой сбора телеметрии
+std::atomic<bool> running{ true };
+Web* globalWebPtr = nullptr; 
+
 void TelemetryWorker(Telemetry::TelemetryCollector& collector) {
     int ticks = 0;
     while (running.load()) {
@@ -52,10 +51,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         if (LOWORD(wParam) == ID_TRAY_EXIT) {
             running.store(false);
 
-            // Мягко останавливаем httplib сервер, чтобы поток webThread завершился
+            
             if (globalWebPtr) {
-                // Убедись, что внутри твоего класса Web есть доступ к httplib::Server 
-                // и метод для его остановки, например: web.Stop();
+                
                 globalWebPtr->Stop();
             }
 
@@ -77,17 +75,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     Web web(webHelper);
     globalWebPtr = &web;
 
-    // 1. Поток телеметрии
+    // 1. Collector
     std::thread telemetryThread(TelemetryWorker, std::ref(collector));
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    // 2. Поток Веб-сервера (на Windows ВСЕГДА в отдельном потоке)
+    // 2. Web
     std::thread webThread([&]() {
         web.Start("0.0.0.0", 8080);
         });
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // 3. Создание скрытого окна и иконки трея
+    // 3. create 
     WNDCLASSEX wc = { 0 };
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.lpfnWndProc = WndProc;
@@ -103,18 +101,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     fled.uID = 1;
     fled.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     fled.uCallbackMessage = WM_TRAYICON;
-    fled.hIcon = LoadIcon(NULL, IDI_APPLICATION); // Дефолтная иконка окошка
+    fled.hIcon = LoadIcon(NULL, IDI_APPLICATION); // icon
     strcpy(fled.szTip, "SystemTraceX");
     Shell_NotifyIcon(NIM_ADD, &fled);
 
-    // 4. Главный цикл Windows (висит тут, пока не нажмут Exit)
+    // 4. main
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
 
-    // 5. Очистка ресурсов
+    // 5. clear
     Shell_NotifyIcon(NIM_DELETE, &fled);
 
     if (webThread.joinable()) webThread.join();
@@ -132,16 +130,16 @@ int main() {
     WebTelemetryHelper webHelper(collector);
     Web web(webHelper);
 
-    // 1. Поток телеметрии
+    
     std::thread telemetryThread(TelemetryWorker, std::ref(collector));
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
     std::cout << "SystemTraceX started on Linux. Press Ctrl+C to exit..." << std::endl;
 
-    // 2. На Linux нам не нужен трей, мы можем занять главный поток веб-сервером
+    
     web.Start("0.0.0.0", 8080);
 
-    // Если сервер по какой-то причине остановился, гасим телеметрию
+    
     running.store(false);
     if (telemetryThread.joinable()) telemetryThread.join();
 
