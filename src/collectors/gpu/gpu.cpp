@@ -407,7 +407,7 @@ namespace GPU {
         DetectGpus(); // safe for Linux (light sysfs reads)
     }
 
-    const GpuSnapshot& GetSnapshots() {
+    GpuSnapshot GetSnapshots() {
 
         std::lock_guard<std::mutex> lock(g_mutex);
         return g_snapshot;

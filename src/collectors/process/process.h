@@ -9,12 +9,12 @@ namespace Proc {
         std::string name;
         double cpuUsage = 0.0;
         uint64_t memoryUsage = 0;
-        double importanceScore = 0.0; // Наш новый коэффициент
+        double importanceScore = 0.0;
     };
 
     struct ProcessSnapshot {
         size_t totalProcesses = 0;
-        std::vector<ProcessEntry> topProcesses; // Топ-20 по важности
+        std::vector<ProcessEntry> topProcesses;
     };
 
     ProcessSnapshot GetSnapshot();

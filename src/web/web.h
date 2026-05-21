@@ -4,12 +4,10 @@
 #include <sstream>
 #include "httplib.h"
 #include "web_helper.h" // твой Snapshot + helper
-#include <nlohmann/json.hpp>
+
 #include <fstream>
 #include <memory>
 #include <mutex>
-
-using json = nlohmann::json;
 
 class Web
 {
@@ -19,10 +17,6 @@ public:
     void Start(const std::string& host = "0.0.0.0", int port = 8080);
     void Stop();
 
-private:
-    std::string GetIndexHtml() const;
-    std::string GetAppJs() const;
-	std::string GetStylesCss() const;
 
 private:
     WebTelemetryHelper& webHelper;
@@ -30,12 +24,7 @@ private:
     std::unique_ptr<httplib::Server> svr;
 };
 
-json BuildAggregatedSeriesJson(
-    const std::vector<Telemetry::AggregatedSnapshot>& data);
-json BuildLiveSeriesJson(
-    const std::vector<Telemetry::Snapshot>& data);
-json BuildSessionHistoryJson(
-    const std::vector<std::vector<Telemetry::AggregatedSnapshot>>& sessions);
+
 
 static std::string ReadFile(const std::string& path)
 {

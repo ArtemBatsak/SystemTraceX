@@ -5,44 +5,37 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include <nlohmann/json.hpp>
+#include <string> // Добавлено для std::string
 
 #include "../collector/collector.h"
 
 class WebTelemetryHelper {
 public:
     explicit WebTelemetryHelper(Telemetry::TelemetryCollector& collector);
-    ~WebTelemetryHelper();
 
-    // Background cache management
-    void StartBackground();
-    void StopBackground();
 
-    // JSON getters - return prepared JSON caches ready to be served by Web
-    nlohmann::json GetSnapshotJson();
-    nlohmann::json GetLiveJson();
-    nlohmann::json Get24HoursJson();
-    nlohmann::json GetLongRangeJson();
-    nlohmann::json GetSessionHistoryJson();
-
-    Telemetry::Snapshot GetCurrentSnapshot();
-    std::vector<Telemetry::Snapshot> GetLiveGraphBootstrap();
-    std::vector<Telemetry::AggregatedSnapshot> Get24HoursSeries();
-    std::vector<Telemetry::AggregatedSnapshot> GetLongRangeSeries();
-    std::vector<std::vector<Telemetry::AggregatedSnapshot>> GetSessionHistory();
-
+    std::string GetLiveWindowString();
+    std::string GetAggregatedWindowString(std::string type);
+    std::string GetSnapshotString();
 
 private:
     Telemetry::TelemetryCollector& collector_;
-    // Caches and synchronization
-    std::mutex cacheMutex_;
-    nlohmann::json snapshotCache_;
-    nlohmann::json liveCache_;
-    nlohmann::json hours24Cache_;
-    nlohmann::json longRangeCache_;
-    nlohmann::json sessionsCache_;
-
-    std::thread liveThread_;
-    std::thread aggThread_;
-    std::atomic<bool> running_ = false;
 };
+
+static std::string EscapeJsonString(const std::string& input) {
+    std::string output;
+    output.reserve(input.length()); // Минимизируем реалокации
+    for (char c : input) {
+        switch (c) {
+        case '\\': output += "\\\\"; break;
+        case '"':  output += "\\\""; break;
+        case '\b': output += "\\b";  break;
+        case '\f': output += "\\f";  break;
+        case '\n': output += "\\n";  break;
+        case '\r': output += "\\r";  break;
+        case '\t': output += "\\t";  break;
+        default:   output += c;      break;
+        }
+    }
+    return output;
+}
