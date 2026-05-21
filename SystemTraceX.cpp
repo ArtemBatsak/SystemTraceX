@@ -137,7 +137,7 @@ int main() {
     std::cout << "SystemTraceX started on Linux. Press Ctrl+C to exit..." << std::endl;
 
     
-    web.Start("0.0.0.0", 8080);
+    web.Start("0.0.0.0", 8000);
 
     
     running.store(false);
