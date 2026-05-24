@@ -307,49 +307,44 @@ std::string WebTelemetryHelper::GetProcessesString()
     ss << "}";
     return ss.str();
 }
+ 
+std::string WebTelemetryHelper::GetErrorsString() {
 
-std::string WebTelemetryHelper::GetErrorsString()
-{
     auto errorSnapshot = SystemErrors::GetSnapshot();
 
-    auto severityToString = [](SystemErrors::Severity severity) {
+    auto severityToString = [](SystemErrors::Severity severity) -> std::string_view {
         switch (severity) {
         case SystemErrors::Severity::Critical: return "Critical";
-        case SystemErrors::Severity::Error: return "Error";
-        case SystemErrors::Severity::Warning: return "Warning";
-        case SystemErrors::Severity::Info: return "Info";
-        default: return "Unknown";
+        case SystemErrors::Severity::Error:    return "Error";
+        case SystemErrors::Severity::Warning:  return "Warning";
+        case SystemErrors::Severity::Info:     return "Info";
+        default:                               return "Unknown";
         }
-    };
+        };
 
-    std::ostringstream ss;
-    ss << "{\n";
-    ss << "  \"lastEvents\": [\n";
-    for (size_t i = 0; i < errorSnapshot.lastEvents.size(); ++i) {
-        const auto& e = errorSnapshot.lastEvents[i];
-        ss << "    {\n"
-            << "      \"timestamp\": " << e.timestamp << ",\n"
-            << "      \"source\": \"" << EscapeJsonString(e.source) << "\",\n"
-            << "      \"severity\": \"" << severityToString(e.severity) << "\",\n"
-            << "      \"message\": \"" << EscapeJsonString(e.message) << "\",\n"
-            << "      \"eventId\": " << e.eventId << "\n"
-            << "    }" << (i + 1 < errorSnapshot.lastEvents.size() ? "," : "") << "\n";
-    }
-    ss << "  ],\n";
+    auto appendEvent = [&](std::string& out, const auto& events) {
+        for (size_t i = 0; i < events.size(); ++i) {
+            const auto& e = events[i];
+            out.append("    {\n      \"timestamp\": ").append(std::to_string(e.timestamp))
+                .append(",\n      \"source\": \"").append(EscapeJsonString(e.source))
+                .append("\",\n      \"severity\": \"").append(severityToString(e.severity))
+                .append("\",\n      \"message\": \"").append(EscapeJsonString(e.message))
+                .append("\",\n      \"eventId\": ").append(std::to_string(e.eventId))
+                .append("\n    }");
+            if (i + 1 < events.size()) out.append(",");
+            out.append("\n");
+        }
+        };
 
-    ss << "  \"criticalEvents\": [\n";
-    for (size_t i = 0; i < errorSnapshot.criticalEvents.size(); ++i) {
-        const auto& e = errorSnapshot.criticalEvents[i];
-        ss << "    {\n"
-            << "      \"timestamp\": " << e.timestamp << ",\n"
-            << "      \"source\": \"" << EscapeJsonString(e.source) << "\",\n"
-            << "      \"severity\": \"" << severityToString(e.severity) << "\",\n"
-            << "      \"message\": \"" << EscapeJsonString(e.message) << "\",\n"
-            << "      \"eventId\": " << e.eventId << "\n"
-            << "    }" << (i + 1 < errorSnapshot.criticalEvents.size() ? "," : "") << "\n";
-    }
-    ss << "  ]\n";
-    ss << "}";
+    std::string result;
+    // Резервируем память, чтобы избежать частых реаллокаций
+    result.reserve(2048 + (errorSnapshot.lastEvents.size() + errorSnapshot.criticalEvents.size()) * 256);
 
-    return ss.str();
+    result.append("{\n  \"lastEvents\": [\n");
+    appendEvent(result, errorSnapshot.lastEvents);
+    result.append("  ],\n  \"criticalEvents\": [\n");
+    appendEvent(result, errorSnapshot.criticalEvents);
+    result.append("  ]\n}");
+
+    return result;
 }
