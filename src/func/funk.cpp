@@ -9,13 +9,13 @@
 std::vector<int> internetTest(const std::vector<std::string>& hosts) {
     std::vector<int> results;
     for (const auto& host : hosts) {
-        int latency = ping(host);
+        int latency = ping(host, 443, 1000);
         results.push_back(latency);
     }
     return results;
 }
 
-int ping(const std::string & host, int port = 443, int timeoutMs = 1000)
+int ping(const std::string & host, int port, int timeoutMs)
     {
         static bool init = false;
         if (!init)
@@ -78,7 +78,8 @@ std::vector<int> internetTest(const std::vector<std::string>&hosts) {
         }
         return results;
     }
-int ping(const std::string& host, int port = 443, int timeoutMs = 1000)
+
+int ping(const std::string& host, int port, int timeoutMs)
     {
         addrinfo hints{};
         hints.ai_family = AF_UNSPEC;
