@@ -4,12 +4,27 @@
 #include <ctime>
 #include <sstream>
 
+
 #ifdef _WIN32
+
 #include <windows.h>
 #include <winevt.h>
 #pragma comment(lib, "wevtapi.lib")
 
 namespace SystemErrors {
+
+    bool operator==(const ErrorEvent& a, const ErrorEvent& b)
+    {
+        return a.eventId == b.eventId && a.timestamp == b.timestamp && a.source == b.source && a.message == b.message;
+    }
+
+    bool operator<(const ErrorEvent& a, const ErrorEvent& b)
+    {
+        if (a.timestamp != b.timestamp) return a.timestamp > b.timestamp; // Sort by timestamp descending
+        if (a.eventId != b.eventId) return a.eventId < b.eventId;
+        if (a.source != b.source) return a.source < b.source;
+        return a.message < b.message;
+    }
 
     namespace {
         constexpr DWORD kMaxEvents = 120;
@@ -59,19 +74,6 @@ namespace SystemErrors {
                 }
             }
             return out;
-        }
-
-        bool operator==(const ErrorEvent& a, const ErrorEvent& b)
-        {
-            return a.eventId == b.eventId && a.timestamp == b.timestamp && a.source == b.source && a.message == b.message;
-        }
-
-        bool operator<(const ErrorEvent& a, const ErrorEvent& b)
-        {
-            if (a.timestamp != b.timestamp) return a.timestamp > b.timestamp; // Sort by timestamp descending
-            if (a.eventId != b.eventId) return a.eventId < b.eventId;
-            if (a.source != b.source) return a.source < b.source;
-            return a.message < b.message;
         }
 
         void DeduplicateAndTrim(std::vector<ErrorEvent>& events, size_t limit)
@@ -230,30 +232,48 @@ namespace SystemErrors {
         }
     } // namespace
 
-    ErrorSnapshot GetSnapshot()
-    {
+    ErrorSnapshot GetSnapshot() {
+
         ErrorSnapshot snap;
 
+
+
         auto appCrash = QueryEvents(
+
             L"Application",
+
             L"*[System[(Level <= 3) and ((EventID=1000) or (EventID=1001)) and (Provider[@Name='Application Error'] or Provider[@Name='Windows Error Reporting'])]]",
+
             "Application");
 
+
+
         auto bsod = QueryEvents(
+
             L"System",
+
             L"*[System[(Level <= 2) and ((EventID=41) or (EventID=1001) or (EventID=6008))]]",
+
             "System");
 
-        snap.lastEvents.reserve(appCrash.size() + bsod.size());
-        snap.lastEvents.insert(snap.lastEvents.end(), appCrash.begin(), appCrash.end());
-        snap.lastEvents.insert(snap.lastEvents.end(), bsod.begin(), bsod.end());
 
-        std::sort(snap.lastEvents.begin(), snap.lastEvents.end());
+
+        snap.lastEvents.reserve(appCrash.size() + bsod.size());
+        std::merge(appCrash.begin(), appCrash.end(),
+            bsod.begin(), bsod.end(),
+            std::back_inserter(snap.lastEvents));
+
 
         DeduplicateAndTrim(snap.lastEvents, 80);
 
+        // 2. Оптимизация фильтрации
         const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
-        const uint64_t dayAgo = (now > 86400 ? now - 86400 : 0);
+        const uint64_t dayAgo = (now > 86400) ? (now - 86400) : 0;
+
+        // Резервируем память для criticalEvents, чтобы избежать реаллокаций
+        // Можно взять небольшой запас, чтобы не угадывать точное число
+        snap.criticalEvents.reserve((std::min)(snap.lastEvents.size(), size_t(20)));
+
         for (const auto& ev : snap.lastEvents) {
             if (ev.severity == Severity::Critical && ev.timestamp >= dayAgo) {
                 snap.criticalEvents.push_back(ev);
@@ -262,6 +282,8 @@ namespace SystemErrors {
 
         return snap;
     }
+
+
 
 } // namespace SystemErrors
 #endif

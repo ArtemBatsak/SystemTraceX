@@ -29,7 +29,7 @@ add_executable(SystemTraceX ${EXE_TYPE}
     src/web/web.cpp
 
     src/resource/resource.rc
- "src/func/funk.cpp")
+)
 
 # ---------------- INCLUDE DIRECTORIES ----------------
 
