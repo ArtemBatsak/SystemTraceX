@@ -27,6 +27,8 @@ add_executable(SystemTraceX ${EXE_TYPE}
 
     src/web/web_helper.cpp
     src/web/web.cpp
+    src/logger/logger.cpp
+    src/func/funk.cpp
 
     src/resource/resource.rc
 )
@@ -41,9 +43,11 @@ target_include_directories(SystemTraceX PRIVATE
 # ---------------- VCPKG PACKAGES ----------------
 
 find_package(httplib CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 target_link_libraries(SystemTraceX PRIVATE
     httplib::httplib
+    spdlog::spdlog
 )
 
 # ---------------- WINDOWS ----------------

@@ -1,34 +1,33 @@
-﻿#include "Logger.h"
-//#include <spdlog/spdlog.h>
-//#include <spdlog/sinks/rotating_file_sink.h>
-//#include <spdlog/sinks/basic_file_sink.h>
-//#include <spdlog/sinks/stdout_color_sinks.h>
+#include "logger.h"
 
-void init_logging()
-{
-	//protect against multiple initializations
-    if (spdlog::get("log"))
+#include <fstream>
+#include <sstream>
+#include <vector>
+
+std::mutex AppLogger::logMutex_;
+
+void AppLogger::Init() {
+    std::lock_guard<std::mutex> lock(logMutex_);
+
+    if (spdlog::get("log")) {
         return;
+    }
 
     namespace fs = std::filesystem;
+    const fs::path logDir = "logs";
+    fs::create_directories(logDir);
 
-    const fs::path log_dir = "logs";
-    fs::create_directories(log_dir);
-    const fs::path log_file = log_dir / "log.log";
+    constexpr std::size_t maxFileSize = 5 * 1024 * 1024;
+    constexpr std::size_t maxFiles = 5;
 
-    constexpr std::size_t max_file_size = 5 * 1024 * 1024;
-    constexpr std::size_t max_files = 5;
+    auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+        LogFilePath().string(), maxFileSize, maxFiles);
+    auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
 
-    
-    auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-        log_file.string(), max_file_size, max_files
-    );
-    auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    fileSink->set_level(spdlog::level::info);
+    consoleSink->set_level(spdlog::level::info);
 
-    file_sink->set_level(spdlog::level::info);
-    console_sink->set_level(spdlog::level::info);
-
-    std::vector<spdlog::sink_ptr> sinks{ console_sink, file_sink };
+    std::vector<spdlog::sink_ptr> sinks{consoleSink, fileSink};
 
     auto logger = std::make_shared<spdlog::logger>("log", sinks.begin(), sinks.end());
     logger->set_level(spdlog::level::info);
@@ -36,6 +35,26 @@ void init_logging()
     logger->flush_on(spdlog::level::info);
 
     spdlog::set_default_logger(logger);
-
     spdlog::info("Logger initialized");
+}
+
+std::filesystem::path AppLogger::LogFilePath() {
+    return std::filesystem::path("logs") / "log.log";
+}
+
+std::string AppLogger::ReadLogs() {
+    std::lock_guard<std::mutex> lock(logMutex_);
+
+    std::ifstream file(LogFilePath(), std::ios::in | std::ios::binary);
+    if (!file.is_open()) {
+        return "";
+    }
+
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+void init_logging() {
+    AppLogger::Init();
 }

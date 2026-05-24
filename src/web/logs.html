@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SystemTraceX Logs</title>
+  <style>
+    body { font-family: sans-serif; background:#0f111a; color:#e2e8f0; margin:0; padding:20px; }
+    .toolbar { display:flex; gap:10px; margin-bottom:10px; }
+    button { padding:8px 12px; cursor:pointer; }
+    pre { background:#151826; border:1px solid #2f3348; border-radius:8px; padding:12px; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Logs</h1>
+  <div class="toolbar"><button onclick="loadLogs()">Refresh</button><a href="/tasks" style="color:#7aa2ff">Back to tasks</a></div>
+  <pre id="logs">Loading...</pre>
+  <script>
+    async function loadLogs() {
+      const res = await fetch('/api/logs');
+      document.getElementById('logs').textContent = res.ok ? await res.text() : 'Failed to load logs';
+    }
+    loadLogs();
+    setInterval(loadLogs, 2000);
+  </script>
+</body>
+</html>

@@ -68,7 +68,7 @@ async function refreshTaskManager() {
     body.innerHTML = '';
     (data.topProcesses || []).slice(0, 40).forEach((p) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${p.pid}</td><td>${p.name}</td><td>${Number(p.cpuUsage).toFixed(2)}</td><td>${formatBytes(p.memoryUsage)}</td><td>${Number(p.importanceScore).toFixed(2)}</td>`;
+      tr.innerHTML = `<td>${p.pid}</td><td>${p.name}</td><td>${Number(p.cpuUsage).toFixed(2)}</td><td>${formatBytes(p.memoryUsage)}</td><td>${Number(p.importanceScore).toFixed(2)}</td><td><button data-pid='${p.pid}' class='watch-btn'>Log</button></td>`;
       body.appendChild(tr);
     });
   }
@@ -82,3 +82,12 @@ async function refreshTaskManager() {
 
 refreshTaskManager();
 setInterval(refreshTaskManager, 1000);
+
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.watch-btn');
+  if (!btn) return;
+  const pid = btn.getAttribute('data-pid');
+  const resp = await fetch(`/api/processes/watch?pid=${pid}`, { method: 'POST' });
+  btn.textContent = resp.ok ? 'Added' : 'Error';
+});

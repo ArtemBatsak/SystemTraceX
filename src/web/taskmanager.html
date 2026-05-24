@@ -30,13 +30,13 @@
 <body>
   <div class="dashboard-header">
     <h1>Task Dispatcher</h1>
-    <div class="muted">Обновление: каждые 1 сек • URL: /tasks</div>
+    <div class="muted">Обновление: каждые 1 сек • URL: /tasks • <a href="/logs" style="color:#8ea2ff">/logs</a></div>
   </div>
 
   <div class="card">
     <h2>Top 40 Processes</h2>
     <table>
-      <thead><tr><th>PID</th><th>Name</th><th>CPU %</th><th>Memory</th><th>Importance</th></tr></thead>
+      <thead><tr><th>PID</th><th>Name</th><th>CPU %</th><th>Memory</th><th>Importance</th><th>Actions</th></tr></thead>
       <tbody id="processes-body"></tbody>
     </table>
   </div>

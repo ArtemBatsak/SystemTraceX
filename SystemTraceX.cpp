@@ -6,6 +6,8 @@
 #include "src/web/web_helper.h"
 #include "src/collector/collector.h"
 #include "src/web/web.h"
+#include "src/logger/logger.h"
+#include "src/func/funk.h"
 
 
 std::atomic<bool> running{ true };
@@ -151,11 +153,14 @@ int WINAPI wWinMain(
     int nCmdShow
 )
 {
+    init_logging();
+
     Telemetry::TelemetryCollector collector("./telemetry_logs");
+    TaskLogger taskLogger;
 
     WebTelemetryHelper webHelper(collector);
 
-    Web web(webHelper);
+    Web web(webHelper, &taskLogger);
 
     globalWebPtr = &web;
 
