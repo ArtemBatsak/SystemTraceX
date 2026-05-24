@@ -30,7 +30,7 @@ namespace SystemErrors {
             return (ft - 116444736000000000ULL) / 10000000ULL;
         }
 
-        // ѕравильна€ конвертаци€ wstring -> UTF-8
+        // Converts wide string to UTF-8
         std::string WideToUtf8(const wchar_t* ws)
         {
             if (!ws || !*ws) return {};
@@ -41,7 +41,7 @@ namespace SystemErrors {
             return out;
         }
 
-        // Ёкранирование спецсимволов дл€ JSON
+        // Sanitizes string for JSON
         std::string SanitizeForJson(const std::string& s)
         {
             std::string out;
@@ -61,24 +61,34 @@ namespace SystemErrors {
             return out;
         }
 
+        bool operator==(const ErrorEvent& a, const ErrorEvent& b)
+        {
+            return a.eventId == b.eventId && a.timestamp == b.timestamp && a.source == b.source && a.message == b.message;
+        }
+
+        bool operator<(const ErrorEvent& a, const ErrorEvent& b)
+        {
+            if (a.timestamp != b.timestamp) return a.timestamp > b.timestamp; // Sort by timestamp descending
+            if (a.eventId != b.eventId) return a.eventId < b.eventId;
+            if (a.source != b.source) return a.source < b.source;
+            return a.message < b.message;
+        }
+
         void DeduplicateAndTrim(std::vector<ErrorEvent>& events, size_t limit)
         {
-            std::vector<ErrorEvent> unique;
-            unique.reserve(events.size());
+            if (events.empty()) return;
 
-            for (const auto& ev : events) {
-                bool exists = false;
-                for (const auto& u : unique) {
-                    if (u.eventId == ev.eventId && u.timestamp == ev.timestamp && u.source == ev.source && u.message == ev.message) {
-                        exists = true;
-                        break;
-                    }
-                }
-                if (!exists) unique.push_back(ev);
+            // 1. Sort: O(N log N)
+            std::sort(events.begin(), events.end());
+
+            // 2. Remove duplicates: O(N)
+            auto last = std::unique(events.begin(), events.end());
+            events.erase(last, events.end());
+
+            // 3. Limit size: O(1)
+            if (events.size() > limit) {
+                events.resize(limit);
             }
-
-            events.swap(unique);
-            if (events.size() > limit) events.resize(limit);
         }
 
         std::vector<ErrorEvent> QueryEvents(const wchar_t* channel, const wchar_t* query, const char* defaultSource)
@@ -111,7 +121,7 @@ namespace SystemErrors {
                     ev.timestamp = static_cast<uint64_t>(std::time(nullptr));
                     ev.eventId = 0;
 
-                    // === 1. XML Ч рендерим первым, пока хендл свежий ===
+                    // === 1. Render XML from event handle, if available ===
                     std::string xml;
                     {
                         DWORD xmlUsed = 0;
@@ -119,13 +129,13 @@ namespace SystemErrors {
                         if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && xmlUsed > 0) {
                             std::vector<wchar_t> xmlBuf(xmlUsed / sizeof(wchar_t) + 1);
                             if (EvtRender(nullptr, hEvents[i], EvtRenderEventXml, xmlUsed, xmlBuf.data(), &xmlUsed, nullptr)) {
-                                // WideToUtf8 Ч правильна€ конвертаци€, без мусора из кириллицы
+                                // WideToUtf8 converts wide string to UTF-8
                                 xml = WideToUtf8(xmlBuf.data());
                             }
                         }
                     }
 
-                    // === 2. —истемные пол€ через hContext ===
+                    // === 2. Render event values using hContext ===
                     DWORD used = 0, props = 0;
                     EvtRender(hContext, hEvents[i], EvtRenderEventValues, 0, nullptr, &used, &props);
                     if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && used > 0) {
@@ -155,8 +165,7 @@ namespace SystemErrors {
                         }
                     }
 
-                    // === 3. ѕарсим EventData из XML ===
-                    // XML использует одинарные или двойные кавычки в атрибутах
+                    // === 3. Extract EventData from XML ===
                     auto extractNamed = [&](const std::string& name) -> std::string {
                         for (const auto& q : { std::string("'"), std::string("\"") }) {
                             std::string open = "<Data Name=" + q + name + q + ">";
@@ -166,7 +175,7 @@ namespace SystemErrors {
                             s += open.size();
                             auto e = xml.find(close, s);
                             if (e == std::string::npos) continue;
-                            // —анитизируем значение Ч пути могут содержать \ и спецсимволы
+                            // Sanitize escape characters \ and "
                             return SanitizeForJson(xml.substr(s, e - s));
                         }
                         return {};
@@ -239,9 +248,7 @@ namespace SystemErrors {
         snap.lastEvents.insert(snap.lastEvents.end(), appCrash.begin(), appCrash.end());
         snap.lastEvents.insert(snap.lastEvents.end(), bsod.begin(), bsod.end());
 
-        std::sort(snap.lastEvents.begin(), snap.lastEvents.end(), [](const ErrorEvent& a, const ErrorEvent& b) {
-            return a.timestamp > b.timestamp;
-            });
+        std::sort(snap.lastEvents.begin(), snap.lastEvents.end());
 
         DeduplicateAndTrim(snap.lastEvents, 80);
 
@@ -351,9 +358,7 @@ namespace SystemErrors {
             "journalctl -b --no-pager -u systemd-coredump* -n 60 -o short-iso 2>/dev/null",
             "systemd-coredump", Severity::Critical, "[coredump] ");
 
-        std::sort(snap.lastEvents.begin(), snap.lastEvents.end(), [](const ErrorEvent& a, const ErrorEvent& b) {
-            return a.timestamp > b.timestamp;
-            });
+        std::sort(snap.lastEvents.begin(), snap.lastEvents.end());
 
         if (snap.lastEvents.size() > 120)
             snap.lastEvents.resize(120);
