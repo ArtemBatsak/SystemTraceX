@@ -24,8 +24,6 @@ private:
     std::unique_ptr<httplib::Server> svr;
 };
 
-
-
 static std::string ReadFile(const std::string& path)
 {
     std::ifstream file(path, std::ios::binary);
