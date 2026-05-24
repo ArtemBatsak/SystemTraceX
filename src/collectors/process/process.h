@@ -5,11 +5,12 @@
 
 namespace Proc {
     struct ProcessEntry {
-        uint32_t pid;
-        std::string name;
+        uint32_t pid = 0;
+        std::string name = "";
         double cpuUsage = 0.0;
         uint64_t memoryUsage = 0;
         double importanceScore = 0.0;
+		std::string path = "";
     };
 
     struct ProcessSnapshot {

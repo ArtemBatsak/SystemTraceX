@@ -337,7 +337,7 @@ std::string WebTelemetryHelper::GetErrorsString() {
         };
 
     std::string result;
-    // Резервируем память, чтобы избежать частых реаллокаций
+    
     result.reserve(2048 + (errorSnapshot.lastEvents.size() + errorSnapshot.criticalEvents.size()) * 256);
 
     result.append("{\n  \"lastEvents\": [\n");

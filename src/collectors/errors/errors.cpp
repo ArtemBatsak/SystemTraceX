@@ -259,19 +259,25 @@ namespace SystemErrors {
 
 
         snap.lastEvents.reserve(appCrash.size() + bsod.size());
-        std::merge(appCrash.begin(), appCrash.end(),
-            bsod.begin(), bsod.end(),
-            std::back_inserter(snap.lastEvents));
+
+        snap.lastEvents.insert(
+            snap.lastEvents.end(),
+            appCrash.begin(), appCrash.end()
+        );
+
+        snap.lastEvents.insert(
+            snap.lastEvents.end(),
+            bsod.begin(), bsod.end()
+        );
 
 
-        DeduplicateAndTrim(snap.lastEvents, 80);
+        DeduplicateAndTrim(snap.lastEvents, 10);
 
-        // 2. Оптимизация фильтрации
+   
         const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
         const uint64_t dayAgo = (now > 86400) ? (now - 86400) : 0;
 
-        // Резервируем память для criticalEvents, чтобы избежать реаллокаций
-        // Можно взять небольшой запас, чтобы не угадывать точное число
+      
         snap.criticalEvents.reserve((std::min)(snap.lastEvents.size(), size_t(20)));
 
         for (const auto& ev : snap.lastEvents) {

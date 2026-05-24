@@ -2,7 +2,7 @@
 
 project(SystemTraceX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
@@ -44,10 +44,12 @@ target_include_directories(SystemTraceX PRIVATE
 
 find_package(httplib CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 target_link_libraries(SystemTraceX PRIVATE
     httplib::httplib
     spdlog::spdlog
+    nlohmann_json::nlohmann_json
 )
 
 # ---------------- WINDOWS ----------------

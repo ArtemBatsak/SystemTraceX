@@ -1,5 +1,8 @@
 #include "funk.h"
+#include "nlohmann/json.hpp"
+#include <fstream>
 
+using json = nlohmann::json;
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -532,7 +535,7 @@ void TaskLogger::ProcessSnapshot()
     {
         if (currentPids.contains(pid))
             continue;
-
+   
         Proc::ProcessEntry deadEntry;
 
         deadEntry.pid = runtime.pid;

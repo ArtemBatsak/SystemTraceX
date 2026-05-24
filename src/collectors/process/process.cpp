@@ -69,6 +69,12 @@ namespace Proc {
                     PROCESS_MEMORY_COUNTERS pmc;
                     if (GetProcessMemoryInfo(hProc, &pmc, sizeof(pmc))) {
                         entry.memoryUsage = pmc.WorkingSetSize;
+                        char pathBuffer[MAX_PATH];
+                        DWORD size = MAX_PATH;
+
+                        if (QueryFullProcessImageNameA(hProc, 0, pathBuffer, &size)) {
+                            entry.path = std::string(pathBuffer, size);
+                        }
                     }
 
                     FILETIME ftCreate, ftExit, ftKernel, ftUser;
@@ -89,7 +95,7 @@ namespace Proc {
                 double memMB = static_cast<double>(entry.memoryUsage) / (1024.0 * 1024.0);
                 entry.importanceScore = (entry.cpuUsage * 1.5) + (memMB / 50.0);
                 allProcesses.push_back(entry);
-
+               
             } while (Process32NextW(hSnap, &pe));
         }
         CloseHandle(hSnap);
