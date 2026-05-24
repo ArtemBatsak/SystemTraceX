@@ -283,7 +283,7 @@ std::string WebTelemetryHelper::GetAggregatedWindowString(std::string type)
 
 std::string WebTelemetryHelper::GetProcessesString()
 {
-    auto processSnapshot = Proc::GetSnapshot();
+    auto processSnapshot = Proc::GetSnapshot(40);
 
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(6);

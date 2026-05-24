@@ -16,6 +16,8 @@ namespace Proc {
         size_t totalProcesses = 0;
         std::vector<ProcessEntry> topProcesses;
     };
+    
 
-    ProcessSnapshot GetSnapshot();
+    ProcessSnapshot GetSnapshot(const int count_tasks);
+
 }

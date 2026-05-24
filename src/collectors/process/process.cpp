@@ -38,7 +38,7 @@ namespace Proc {
         return ull.QuadPart;
     }
 
-    ProcessSnapshot GetSnapshot() {
+    ProcessSnapshot GetSnapshot(const int count_tasks) {
         ProcessSnapshot snap;
         std::vector<ProcessEntry> allProcesses;
 
@@ -99,9 +99,13 @@ namespace Proc {
             return a.importanceScore > b.importanceScore;
             });
 
-        size_t count = (std::min)((size_t)40, allProcesses.size());
-        snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
-
+        if (count_tasks <= 0) {
+            snap.topProcesses = allProcesses;
+        }
+        else{
+            size_t count = (std::min)((size_t)count_tasks, allProcesses.size());
+            snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
+        }
         return snap;
     }
 }
