@@ -269,9 +269,6 @@ int WINAPI wWinMain(
 // ==========================================
 //                 LINUX
 // ==========================================
-
-
-
 #else
 int main() {
     Telemetry::TelemetryCollector collector("./telemetry_logs");

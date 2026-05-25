@@ -116,7 +116,6 @@ namespace Proc {
     }
 }
 #endif
-
     // ==========================================================
     // LINUX IMPLEMENTATION
     // ==========================================================
@@ -143,7 +142,7 @@ namespace Proc {
             return user + nice + system + idle + iowait + irq + softirq + steal;
         }
 
-        ProcessSnapshot GetSnapshot() {
+        ProcessSnapshot GetSnapshot(const int count_tasks) {
             ProcessSnapshot snap;
             std::vector<ProcessEntry> allProcesses;
             unsigned long long systemTime = GetTotalCpuTime();
@@ -218,9 +217,13 @@ namespace Proc {
                 return a.importanceScore > b.importanceScore;
                 });
 
-            // Keep top 40 processes
-            size_t count = (std::min)((size_t)40, allProcesses.size());
-            snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
+            if (count_tasks <= 0) {
+                snap.topProcesses = allProcesses;
+            }
+            else {
+                size_t count = (std::min)((size_t)count_tasks, allProcesses.size());
+                snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
+            }
 
             // Periodically clear history to avoid keeping closed process entries
             if (g_linuxCpuHistory.size() > 2000) {

@@ -386,7 +386,10 @@ namespace SystemErrors {
             "journalctl -b --no-pager -u systemd-coredump* -n 60 -o short-iso 2>/dev/null",
             "systemd-coredump", Severity::Critical, "[coredump] ");
 
-        std::sort(snap.lastEvents.begin(), snap.lastEvents.end());
+        std::sort(snap.lastEvents.begin(), snap.lastEvents.end(),
+            [](const auto& a, const auto& b) {
+                return a.timestamp > b.timestamp;
+            });
 
         if (snap.lastEvents.size() > 120)
             snap.lastEvents.resize(120);
