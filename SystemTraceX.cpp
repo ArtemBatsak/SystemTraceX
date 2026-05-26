@@ -13,17 +13,6 @@
 std::atomic<bool> running{ true };
 Web* globalWebPtr = nullptr; 
 
-void TelemetryWorker(Telemetry::TelemetryCollector& collector) {
-    int ticks = 0;
-    while (running.load()) {
-        collector.PushLiveSnapshot(collector.CollectRawSnapshot());
-        ++ticks;
-        if (ticks % 10 == 0) collector.FlushTenSecondAggregation();
-        if (ticks % 60 == 0) collector.FlushMinuteAggregation();
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-}
-
 // ==========================================
 //                 WINDOWS
 // ==========================================
@@ -164,16 +153,6 @@ int WINAPI wWinMain(
 
     globalWebPtr = &web;
 
-    // telemetry
-    std::thread telemetryThread(
-        TelemetryWorker,
-        std::ref(collector)
-    );
-
-    std::this_thread::sleep_for(
-        std::chrono::seconds(1)
-    );
-
     // web
     std::thread webThread([&]()
         {
@@ -259,9 +238,6 @@ int WINAPI wWinMain(
     if (webThread.joinable())
         webThread.join();
 
-    if (telemetryThread.joinable())
-        telemetryThread.join();
-
     return 0;
 }
 
@@ -275,18 +251,11 @@ int main() {
     WebTelemetryHelper webHelper(collector);
     Web web(webHelper);
 
-    
-    std::thread telemetryThread(TelemetryWorker, std::ref(collector));
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-
     std::cout << "SystemTraceX started on Linux. Press Ctrl+C to exit..." << std::endl;
 
-    
     web.Start("0.0.0.0", 8000);
 
-    
     running.store(false);
-    if (telemetryThread.joinable()) telemetryThread.join();
 
     return 0;
 }

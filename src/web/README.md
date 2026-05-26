@@ -22,14 +22,16 @@ Web::WebTelemetryHelper webHelper(collector);
 
 ## Basic requirement
 
-Before reading data through the web helper, background collection must run continuously:
+Create the collector before the web helper. The collector starts background
+collection automatically:
 
 ```cpp
-auto snapshot = collector.CollectRawSnapshot();
-collector.PushLiveSnapshot(snapshot);
+Telemetry::TelemetryCollector collector("./telemetry_logs");
+Web::WebTelemetryHelper webHelper(collector);
 ```
 
-Otherwise `GetCurrentSnapshot()` will not return up-to-date values.
+After that, `GetCurrentSnapshot()` reads the latest data collected in the
+background.
 
 ## Get current snapshot
 

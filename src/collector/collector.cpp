@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <utility>
 
 namespace Telemetry {
 
@@ -15,11 +16,14 @@ TelemetryCollector::TelemetryCollector(std::string logDirectory)
     currentSessionStartMs_ = NowMs();
     WriteSessionStart(currentSessionStartMs_);
     sessionOpen_ = true;
+    StartWorker();
 }
 
 TelemetryCollector::~TelemetryCollector() {
+    StopWorker();
     if (!sessionOpen_) return;
-    const auto endTs = lastSnapshot_.timestampMs > 0 ? lastSnapshot_.timestampMs : NowMs();
+    const auto lastSnapshot = GetLastSnapshot();
+    const auto endTs = lastSnapshot.timestampMs > 0 ? lastSnapshot.timestampMs : NowMs();
     WriteSessionEnd(currentSessionStartMs_, endTs);
     sessionOpen_ = false;
 }
@@ -35,13 +39,17 @@ Snapshot TelemetryCollector::CollectRawSnapshot() {
 	snapshot.disk = Disk::GetSnapshot();
 	snapshot.network = Net::GetSnapshot();
 	snapshot.system = SystemInfo::GetSnapshot();
-    lastProcessSnapshot_ = Proc::GetSnapshot(0);
-    lastProcessSnapshot_.timestampMs = snapshot.timestampMs;
 	return snapshot;
 }
 
 void TelemetryCollector::PushLiveSnapshot(Snapshot snapshot) {
+    auto processSnapshot = CollectProcessSnapshot(snapshot.timestampMs);
+    PushLiveSnapshot(std::move(snapshot), std::move(processSnapshot));
+}
+
+void TelemetryCollector::PushLiveSnapshot(Snapshot snapshot, Proc::ProcessSnapshot processSnapshot) {
     std::unique_lock<std::shared_mutex> lock(liveMutex_);
+    lastProcessSnapshot_ = std::move(processSnapshot);
     lastSnapshot_ = snapshot;
     liveRing_.push_back(std::move(snapshot));
     if (liveRing_.size() > kLiveCapacity) {
@@ -138,6 +146,60 @@ Proc::ProcessSnapshot TelemetryCollector::GetLastProcessSnapshot() const {
 	return lastProcessSnapshot_;
 }
 
+void TelemetryCollector::StartWorker() {
+    workerRunning_.store(true);
+    workerThread_ = std::thread(&TelemetryCollector::WorkerLoop, this);
+}
+
+void TelemetryCollector::StopWorker() {
+    if (workerRunning_.exchange(false)) {
+        workerWake_.notify_all();
+    }
+
+    if (workerThread_.joinable()) {
+        workerThread_.join();
+    }
+}
+
+void TelemetryCollector::WorkerLoop() {
+    using Clock = std::chrono::steady_clock;
+    constexpr auto updateInterval = std::chrono::seconds(1);
+    constexpr auto idleCheckInterval = std::chrono::milliseconds(50);
+
+    int ticks = 0;
+    auto lastUpdateAt = Clock::now() - updateInterval;
+
+    while (workerRunning_.load()) {
+        const auto now = Clock::now();
+        if (now - lastUpdateAt >= updateInterval) {
+            lastUpdateAt = now;
+
+            auto snapshot = CollectRawSnapshot();
+            auto processSnapshot = CollectProcessSnapshot(snapshot.timestampMs);
+            PushLiveSnapshot(std::move(snapshot), std::move(processSnapshot));
+
+            ++ticks;
+            if (ticks % 10 == 0) {
+                FlushTenSecondAggregation();
+            }
+            if (ticks % 60 == 0) {
+                FlushMinuteAggregation();
+            }
+        }
+
+        std::unique_lock<std::mutex> lock(workerMutex_);
+        workerWake_.wait_for(lock, idleCheckInterval, [this] {
+            return !workerRunning_.load();
+        });
+    }
+}
+
+Proc::ProcessSnapshot TelemetryCollector::CollectProcessSnapshot(uint64_t timestampMs) {
+    auto snapshot = Proc::GetSnapshot(0);
+    snapshot.timestampMs = timestampMs;
+    return snapshot;
+}
+
 uint64_t TelemetryCollector::NowMs() {
     const auto now = std::chrono::time_point_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now());
@@ -220,7 +282,14 @@ void TelemetryCollector::AppendLongRecord(const AggregatedSnapshot& snap) {
     const bool exists = std::filesystem::exists(longFilePath_, ec) && !ec;
     const auto currentSize = exists ? std::filesystem::file_size(longFilePath_, ec) : 0;
     if (!ec && currentSize > kLongFileRuntimeRotateBytes && sessionOpen_) {
-        const uint64_t endTs = lastSnapshot_.timestampMs > 0 ? lastSnapshot_.timestampMs : NowMs();
+        uint64_t endTs = 0;
+        {
+            std::shared_lock<std::shared_mutex> lock(liveMutex_);
+            endTs = lastSnapshot_.timestampMs;
+        }
+        if (endTs == 0) {
+            endTs = NowMs();
+        }
 
         AggregatedSnapshot endRecord;
         endRecord.recordType = AggregatedRecordType::SessionEnd;

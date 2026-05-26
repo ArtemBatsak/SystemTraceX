@@ -83,14 +83,14 @@ Web::WebTelemetryHelper webHelper(collector);
 
 ### Core workflow
 
-Required call order:
+Creating the collector starts its background update thread automatically:
 
 ```cpp
-auto snapshot = collector.CollectRawSnapshot();
-collector.PushLiveSnapshot(snapshot);
+Telemetry::TelemetryCollector collector("./telemetry_logs");
 ```
 
-Always collect first, then push to the live buffer.
+After that, other threads can read data through getters without manually driving
+the collector loop.
 
 ### Key methods
 
@@ -136,22 +136,12 @@ Always collect first, then push to the live buffer.
 ```cpp
 #include "collector.h"
 #include "../web/web_helper.h"
-#include <chrono>
-#include <thread>
 
 int main() {
     Telemetry::TelemetryCollector collector("./telemetry_logs");
     Web::WebTelemetryHelper webHelper(collector);
 
-    while (true) {
-        auto snapshot = collector.CollectRawSnapshot();
-        collector.PushLiveSnapshot(snapshot);
-
-        // Optional periodic aggregations
-        collector.FlushTenSecondAggregation();
-        collector.FlushMinuteAggregation();
-
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+    auto current = collector.GetLastSnapshot();
+    auto live = collector.GetLiveWindow();
 }
 ```

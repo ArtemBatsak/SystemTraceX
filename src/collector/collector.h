@@ -1,12 +1,15 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../collectors/cpu/cpu.h"
@@ -91,6 +94,12 @@ private:
     static uint64_t NowMs();
     static AggregatedSnapshot AggregateWindow(const std::vector<Snapshot>& window);
 
+    void StartWorker();
+    void StopWorker();
+    void WorkerLoop();
+    Proc::ProcessSnapshot CollectProcessSnapshot(uint64_t timestampMs);
+    void PushLiveSnapshot(Snapshot snapshot, Proc::ProcessSnapshot processSnapshot);
+
     void AppendLongRecord(const AggregatedSnapshot& snap);
     std::vector<AggregatedSnapshot> ReadLongRecords(const std::string& filePath) const;
     std::vector<AggregatedSnapshot> ReadCombinedLongRecords() const;
@@ -112,6 +121,10 @@ private:
     uint64_t currentSessionStartMs_ = 0;
     bool sessionOpen_ = false;
 
+    std::atomic<bool> workerRunning_{false};
+    std::thread workerThread_;
+    std::mutex workerMutex_;
+    std::condition_variable workerWake_;
 
 	Proc::ProcessSnapshot lastProcessSnapshot_;
 };
