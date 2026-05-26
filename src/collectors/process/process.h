@@ -2,7 +2,6 @@
 #include <string>
 #include <vector>
 #include <cstdint>
-
 namespace Proc {
     struct ProcessEntry {
         uint32_t pid = 0;
@@ -14,6 +13,7 @@ namespace Proc {
     };
 
     struct ProcessSnapshot {
+        uint64_t timestampMs = 0;
         size_t totalProcesses = 0;
         std::vector<ProcessEntry> topProcesses;
     };

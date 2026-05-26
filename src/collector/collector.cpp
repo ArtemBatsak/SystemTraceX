@@ -35,7 +35,8 @@ Snapshot TelemetryCollector::CollectRawSnapshot() {
 	snapshot.disk = Disk::GetSnapshot();
 	snapshot.network = Net::GetSnapshot();
 	snapshot.system = SystemInfo::GetSnapshot();
-
+    lastProcessSnapshot_ = Proc::GetSnapshot(0);
+    lastProcessSnapshot_.timestampMs = snapshot.timestampMs;
 	return snapshot;
 }
 
@@ -130,6 +131,11 @@ std::vector<AggregatedSnapshot> TelemetryCollector::GetRecent24Hours() const {
 std::vector<AggregatedSnapshot> TelemetryCollector::GetLongRange() const {
     std::lock_guard<std::mutex> lock(binaryMutex_);
     return ReadCombinedLongRecords();
+}
+
+Proc::ProcessSnapshot TelemetryCollector::GetLastProcessSnapshot() const {
+	std::shared_lock<std::shared_mutex> lock(liveMutex_);
+	return lastProcessSnapshot_;
 }
 
 uint64_t TelemetryCollector::NowMs() {

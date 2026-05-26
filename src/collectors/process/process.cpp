@@ -5,6 +5,8 @@
 #include <vector>
 #include <fstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace Proc {
 
@@ -22,14 +24,16 @@ namespace Proc {
 #include <tlhelp32.h>
 #include <psapi.h>
 
+
 #pragma comment(lib, "psapi.lib")
 namespace Proc {
+
     struct CpuHistory {
         uint64_t lastProcessTime = 0;
         uint64_t lastSystemTime = 0;
     };
 
-    static std::map<uint32_t, CpuHistory> g_cpuHistory;
+    static std::unordered_map<uint32_t, CpuHistory> g_cpuHistory;
 
     static uint64_t FileTimeToUint64(const FILETIME& ft) {
         ULARGE_INTEGER ull;
@@ -41,79 +45,131 @@ namespace Proc {
     ProcessSnapshot GetSnapshot(const int count_tasks) {
         ProcessSnapshot snap;
         std::vector<ProcessEntry> allProcesses;
+        allProcesses.reserve(512);
 
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnap == INVALID_HANDLE_VALUE) return snap;
+        if (hSnap == INVALID_HANDLE_VALUE)
+            return snap;
 
-        PROCESSENTRY32W pe;
+        PROCESSENTRY32W pe{};
         pe.dwSize = sizeof(pe);
 
-        FILETIME sysIdle, sysKernel, sysUser;
-        GetSystemTimes(&sysIdle, &sysKernel, &sysUser);
-        uint64_t currentSysTime = FileTimeToUint64(sysKernel) + FileTimeToUint64(sysUser);
+        FILETIME idle, kernel, user;
+        GetSystemTimes(&idle, &kernel, &user);
+
+        uint64_t sysTime = FileTimeToUint64(kernel) + FileTimeToUint64(user);
+
+        auto addHistory = [&](uint32_t pid, uint64_t procTime) {
+            g_cpuHistory[pid] = { procTime, sysTime };
+            };
 
         if (Process32FirstW(hSnap, &pe)) {
             do {
-                ProcessEntry entry;
-                entry.pid = pe.th32ProcessID;
-                if (entry.pid == 0) continue;
+                uint32_t pid = pe.th32ProcessID;
+                if (pid == 0) continue;
 
-                int size = WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, NULL, 0, NULL, NULL);
-                if (size > 0) {
-                    entry.name.resize(size - 1);
-                    WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, &entry.name[0], size, NULL, NULL);
+                ProcessEntry entry;
+                entry.pid = pid;
+
+                // name (safe + fast)
+                {
+                    char buf[MAX_PATH];
+                    int len = WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, buf, MAX_PATH, nullptr, nullptr);
+                    if (len > 1)
+                        entry.name.assign(buf, len - 1);
                 }
 
-                HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, entry.pid);
-                if (hProc) {
+                HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+                if (!hProc) {
+                    allProcesses.push_back(entry);
+                    continue;
+                }
+
+                // memory + path
+                {
                     PROCESS_MEMORY_COUNTERS pmc;
                     if (GetProcessMemoryInfo(hProc, &pmc, sizeof(pmc))) {
                         entry.memoryUsage = pmc.WorkingSetSize;
-                        char pathBuffer[MAX_PATH];
-                        DWORD size = MAX_PATH;
-
-                        if (QueryFullProcessImageNameA(hProc, 0, pathBuffer, &size)) {
-                            entry.path = std::string(pathBuffer, size);
-                        }
                     }
 
-                    FILETIME ftCreate, ftExit, ftKernel, ftUser;
-                    if (GetProcessTimes(hProc, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
-                        uint64_t currentProcTime = FileTimeToUint64(ftKernel) + FileTimeToUint64(ftUser);
-                        if (g_cpuHistory.count(entry.pid)) {
-                            uint64_t procDiff = currentProcTime - g_cpuHistory[entry.pid].lastProcessTime;
-                            uint64_t sysDiff = currentSysTime - g_cpuHistory[entry.pid].lastSystemTime;
-                            if (sysDiff > 0) {
-                                entry.cpuUsage = (100.0 * (double)procDiff) / (double)sysDiff;
-                            }
-                        }
-                        g_cpuHistory[entry.pid] = { currentProcTime, currentSysTime };
+                    char pathBuf[32768];
+                    DWORD size = sizeof(pathBuf);
+                    if (QueryFullProcessImageNameA(hProc, 0, pathBuf, &size)) {
+                        entry.path.assign(pathBuf, size);
                     }
-                    CloseHandle(hProc);
                 }
 
-                double memMB = static_cast<double>(entry.memoryUsage) / (1024.0 * 1024.0);
-                entry.importanceScore = (entry.cpuUsage * 1.5) + (memMB / 50.0);
-                allProcesses.push_back(entry);
-               
+                // CPU
+                FILETIME c, e, k, u;
+                if (GetProcessTimes(hProc, &c, &e, &k, &u)) {
+
+                    uint64_t procTime = FileTimeToUint64(k) + FileTimeToUint64(u);
+
+                    auto it = g_cpuHistory.find(pid);
+
+                    if (it != g_cpuHistory.end()) {
+                        uint64_t procDiff = procTime - it->second.lastProcessTime;
+                        uint64_t sysDiff = sysTime - it->second.lastSystemTime;
+
+                        if (sysDiff > 0) {
+                            entry.cpuUsage =
+                                (100.0 * (double)procDiff) / (double)sysDiff;
+                        }
+                    }
+
+                    addHistory(pid, procTime);
+                }
+
+                CloseHandle(hProc);
+
+                double memMB = entry.memoryUsage / (1024.0 * 1024.0);
+                entry.importanceScore = entry.cpuUsage * 1.5 + memMB / 50.0;
+
+                allProcesses.push_back(std::move(entry));
+
             } while (Process32NextW(hSnap, &pe));
         }
+
         CloseHandle(hSnap);
 
+        // cleanup dead PIDs 
+        {
+            std::unordered_set<uint32_t> alive;
+            alive.reserve(allProcesses.size());
+
+            for (auto& p : allProcesses)
+                alive.insert(p.pid);
+
+            for (auto it = g_cpuHistory.begin(); it != g_cpuHistory.end();) {
+                if (!alive.contains(it->first))
+                    it = g_cpuHistory.erase(it);
+                else
+                    ++it;
+            }
+        }
+
         snap.totalProcesses = allProcesses.size();
-        std::sort(allProcesses.begin(), allProcesses.end(), [](const ProcessEntry& a, const ProcessEntry& b) {
-            return a.importanceScore > b.importanceScore;
-            });
+
+       std::partial_sort(
+            allProcesses.begin(),
+            allProcesses.begin() + std::min<size_t>(count_tasks > 0 ? count_tasks : allProcesses.size(), allProcesses.size()),
+            allProcesses.end(),
+            [](const ProcessEntry& a, const ProcessEntry& b) {
+                return a.importanceScore > b.importanceScore;
+            }
+        );
 
         if (count_tasks <= 0) {
-            snap.topProcesses = allProcesses;
+            snap.topProcesses = std::move(allProcesses);
         }
-        else{
-            size_t count = (std::min)((size_t)count_tasks, allProcesses.size());
+        else {
+            size_t count = std::min<size_t>(count_tasks, allProcesses.size());
             snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
         }
+
         return snap;
     }
+
 }
 #endif
     // ==========================================================

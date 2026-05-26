@@ -16,6 +16,8 @@
 #include "../collectors/ram/ram.h"
 #include "../collectors/systeminfo/systemInfo.h"
 
+#include "../collectors/process/process.h"
+
 namespace Telemetry {
 
 enum class AggregatedRecordType : uint8_t {
@@ -83,6 +85,7 @@ public:
     std::vector<Snapshot> GetLiveWindow() const;
     std::vector<AggregatedSnapshot> GetRecent24Hours() const;
     std::vector<AggregatedSnapshot> GetLongRange() const;
+	Proc::ProcessSnapshot GetLastProcessSnapshot() const;
 
 private:
     static uint64_t NowMs();
@@ -108,6 +111,9 @@ private:
     std::deque<AggregatedSnapshot> tenSecRing_;
     uint64_t currentSessionStartMs_ = 0;
     bool sessionOpen_ = false;
+
+
+	Proc::ProcessSnapshot lastProcessSnapshot_;
 };
 
 } // namespace Telemetry
