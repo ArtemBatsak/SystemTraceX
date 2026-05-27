@@ -122,436 +122,332 @@ int ping(const std::string& host, int port, int timeoutMs)
 #endif 
 
 
-TaskLogger::TaskLogger()
-{
-    loadProcessNames();
 
-    running_ = true;
 
-    workerThread_ = std::thread([this]()
-        {
-            while (running_)
-            {
-                ProcessSnapshot();
-                std::this_thread::sleep_for(std::chrono::seconds(10));
-            }
-        });
+void ProcessRing::addEntry(const MetricPoint& entry) {
+    history[currentIndex] = entry;
+
+    currentIndex =
+        (currentIndex + 1) % HISTORY_SIZE;
+
+    if (validEntries < HISTORY_SIZE) {
+        validEntries++;
+    }
 }
 
-TaskLogger::~TaskLogger()
-{
+MetricPoint ProcessRing::getLatest() const {
+
+    if (validEntries == 0) {
+        return {};
+    }
+
+    size_t latestIndex =
+        (currentIndex + HISTORY_SIZE - 1)
+        % HISTORY_SIZE;
+
+    return history[latestIndex];
+}
+
+std::vector<MetricPoint> ProcessRing::getAll() const {
+
+    std::vector<MetricPoint> result;
+
+    result.reserve(validEntries);
+
+    if (validEntries == 0) {
+        return result;
+    }
+
+    size_t start =
+        (currentIndex + HISTORY_SIZE - validEntries)
+        % HISTORY_SIZE;
+
+    for (size_t i = 0; i < validEntries; i++) {
+
+        size_t index =
+            (start + i) % HISTORY_SIZE;
+
+        result.push_back(history[index]);
+    }
+
+    return result;
+}
+
+TaskLogger::TaskLogger(
+    Telemetry::TelemetryCollector& collector,
+    const std::string& saveFile
+)
+    : collector_(collector),
+    saveFile_(saveFile),
+    running_(true) {
+
+    loadTrackedProcesses();
+
+    loggerThread_ =
+        std::thread(
+            &TaskLogger::updateLoop,
+            this
+        );
+}
+
+TaskLogger::~TaskLogger() {
+
     running_ = false;
 
-    if (workerThread_.joinable())
-        workerThread_.join();
+    if (loggerThread_.joinable()) {
+        loggerThread_.join();
+    }
 
-    saveProcesslist();
+    saveTrackedProcesses();
 }
 
-void TaskLogger::loadProcessNames()
-{
-    namespace fs = std::filesystem;
+void TaskLogger::addProcessToTrack(
+    const std::string& name,
+    const std::string& path,
+    bool enable
+) {
+    std::lock_guard<std::mutex> lock(mutex_);
 
-    if (!fs::exists(processListPath_))
-    {
-        saveProcesslist();
-        return;
-    }
+    TrackedProcess proc;
 
-    std::ifstream file(processListPath_);
-
-    if (!file.is_open())
-    {
-        spdlog::error("Failed open {}", processListPath_);
-        return;
-    }
-
-    nlohmann::json j;
-    file >> j;
-
-    processNamesToLog.clear();
-
-    if (!j.contains("processes"))
-        return;
-
-    for (const auto& item : j["processes"])
-    {
-        WatchedProcess proc;
-
-        proc.name = item.value("name", "");
-        proc.path = item.value("path", "");
-        proc.enabled = item.value("enabled", true);
-
-        if (!proc.name.empty())
-        {
-            processNamesToLog.push_back(proc);
-        }
-    }
-
-    spdlog::info("Loaded {} watched processes", processNamesToLog.size());
-}
-
-void TaskLogger::saveProcesslist()
-{
-    nlohmann::json j;
-
-    j["processes"] = nlohmann::json::array();
-
-    for (const auto& proc : processNamesToLog)
-    {
-        j["processes"].push_back({
-            { "name", proc.name },
-            { "path", proc.path },
-            { "enabled", proc.enabled }
-            });
-    }
-
-    std::ofstream file(processListPath_);
-
-    if (!file.is_open())
-    {
-        spdlog::error("Failed save {}", processListPath_);
-        return;
-    }
-
-    file << j.dump(4);
-}
-
-void TaskLogger::addProcessPerName(const std::string& name)
-{
-    auto it = std::find_if(
-        processNamesToLog.begin(),
-        processNamesToLog.end(),
-        [&](const WatchedProcess& p)
-        {
-            return p.name == name;
-        }
-    );
-
-    if (it != processNamesToLog.end())
-    {
-        it->enabled = true;
-
-        spdlog::info("Monitoring enabled for {}", name);
-
-        saveProcesslist();
-        return;
-    }
-
-    WatchedProcess proc;
     proc.name = name;
-    proc.enabled = true;
+    proc.path = path;
+    proc.enable = enable;
 
-    processNamesToLog.push_back(proc);
+    trackedList_[path] = proc;
 
-    spdlog::info("Added process monitoring {}", name);
-
-    saveProcesslist();
+    if (!trackedProcesses_.count(path)) {
+        trackedProcesses_[path] =
+            ProcessRing{};
+    }
 }
 
-void TaskLogger::addProcessPerPid(uint32_t pid)
-{
-    auto snap = Proc::GetSnapshot(0);
+void TaskLogger::removeProcessToTrack(const std::string& path) {
+    std::lock_guard<std::mutex> lock(mutex_);
 
-    auto it = std::find_if(
-        snap.topProcesses.begin(),
-        snap.topProcesses.end(),
-        [&](const Proc::ProcessEntry& p)
-        {
-            return p.pid == pid;
-        }
-    );
+    trackedList_.erase(path);
 
-    if (it == snap.topProcesses.end())
-    {
-        spdlog::warn("Process pid {} not found", pid);
-        return;
+    trackedProcesses_.erase(path);
+}
+
+void TaskLogger::setTrackEnabled(const std::string& path,bool enable) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = trackedList_.find(path);
+
+    if (it != trackedList_.end()) {
+        it->second.enable = enable;
+    }
+}
+
+std::vector<MetricPoint>TaskLogger::getProcessHistoryByPath(const std::string& path) const {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it =
+        trackedProcesses_.find(path);
+
+    if (it == trackedProcesses_.end()) {
+        return {};
     }
 
-    auto already = std::find_if(
-        processNamesToLog.begin(),
-        processNamesToLog.end(),
-        [&](const WatchedProcess& p)
-        {
-            return p.name == it->name &&
-                p.path == it->path;
-        }
-    );
+    return it->second.getAll();
+}
 
-    if (already != processNamesToLog.end())
-    {
-        already->enabled = true;
+MetricPoint TaskLogger::getLatestProcessPointByPath(const std::string& path) const {
 
-        saveProcesslist();
+    std::lock_guard<std::mutex> lock(mutex_);
 
-        spdlog::info(
-            "Monitoring enabled for {} ({})",
-            it->name,
-            it->path
-        );
+    auto it =
+        trackedProcesses_.find(path);
 
-        return;
+    if (it == trackedProcesses_.end()) {
+        return {};
     }
 
-    WatchedProcess proc;
-
-    proc.name = it->name;
-    proc.path = it->path;
-    proc.enabled = true;
-
-    processNamesToLog.push_back(proc);
-
-    saveProcesslist();
-
-    spdlog::info(
-        "Added monitoring for {} ({})",
-        proc.name,
-        proc.path
-    );
+    return it->second.getLatest();
 }
 
-void TaskLogger::removeProcessPerName(const std::string& name)
-{
-    auto it = std::find_if(
-        processNamesToLog.begin(),
-        processNamesToLog.end(),
-        [&](const WatchedProcess& p)
-        {
-            return p.name == name;
-        }
-    );
+std::vector<MetricPoint>TaskLogger::getProcessHistoryByName(const std::string& name) const {
 
-    if (it == processNamesToLog.end())
-        return;
+    std::lock_guard<std::mutex> lock(mutex_);
 
-    it->enabled = false;
+    for (const auto& pair : trackedList_) {
 
-    spdlog::info("Monitoring disabled for {}", name);
-
-    saveProcesslist();
-}
-
-void TaskLogger::removeProcessPerPid(uint32_t pid)
-{
-    auto runtime = runtimeProcesses_.find(pid);
-
-    if (runtime == runtimeProcesses_.end())
-        return;
-
-    auto it = std::find_if(
-        processNamesToLog.begin(),
-        processNamesToLog.end(),
-        [&](const WatchedProcess& p)
-        {
-            return p.name == runtime->second.name &&
-                p.path == runtime->second.path;
-        }
-    );
-
-    if (it == processNamesToLog.end())
-        return;
-
-    it->enabled = false;
-
-    spdlog::info(
-        "Monitoring disabled for {} ({})",
-        it->name,
-        it->path
-    );
-
-    saveProcesslist();
-}
-
-bool TaskLogger::isWatchedProcess(
-    const Proc::ProcessEntry& entry
-) const
-{
-    for (const auto& proc : processNamesToLog)
-    {
-        if (!proc.enabled)
+        if (pair.second.name != name) {
             continue;
+        }
 
-        if (proc.name != entry.name)
-            continue;
-
-        if (!proc.path.empty() &&
-            proc.path != entry.path)
-            continue;
-
-        return true;
-    }
-
-    return false;
-}
-
-void TaskLogger::logProcessInfo(
-    ProcessEventType type,
-    const Proc::ProcessEntry& entry,
-    const std::string& extra
-)
-{
-    switch (type)
-    {
-    case ProcessEventType::Started:
-    {
-        spdlog::info(
-            "[PROCESS_START] {} | pid={} | path={}",
-            entry.name,
-            entry.pid,
-            entry.path
-        );
-        break;
-    }
-
-    case ProcessEventType::Exited:
-    {
-        spdlog::info(
-            "[PROCESS_EXIT] {} | pid={} | path={}",
-            entry.name,
-            entry.pid,
-            entry.path
-        );
-        break;
-    }
-
-    case ProcessEventType::CpuSpike:
-    {
-        spdlog::warn(
-            "[CPU_SPIKE] {} | pid={} | cpu={:.2f}% | {}",
-            entry.name,
-            entry.pid,
-            entry.cpuUsage,
-            extra
-        );
-        break;
-    }
-
-    case ProcessEventType::MemorySpike:
-    {
-        double memMB =
-            static_cast<double>(entry.memoryUsage) /
-            (1024.0 * 1024.0);
-
-        spdlog::warn(
-            "[MEMORY_SPIKE] {} | pid={} | memory={:.2f} MB | {}",
-            entry.name,
-            entry.pid,
-            memMB,
-            extra
-        );
-        break;
-    }
-
-    default:
-        break;
-    }
-}
-
-void TaskLogger::ProcessSnapshot()
-{
-    snapshot_ = Proc::GetSnapshot(0);
-
-    std::unordered_map<uint32_t, bool> currentPids;
-
-    for (const auto& proc : snapshot_.topProcesses)
-    {
-        if (!isWatchedProcess(proc))
-            continue;
-
-        currentPids[proc.pid] = true;
-
-        auto runtimeIt = runtimeProcesses_.find(proc.pid);
-
-        if (runtimeIt == runtimeProcesses_.end())
-        {
-            RuntimeProcessState state;
-
-            state.pid = proc.pid;
-            state.name = proc.name;
-            state.path = proc.path;
-
-            state.lastCpu = proc.cpuUsage;
-            state.lastMemory = proc.memoryUsage;
-
-            state.alive = true;
-
-            state.lastSeen =
-                std::chrono::steady_clock::now();
-
-            runtimeProcesses_[proc.pid] = state;
-
-            logProcessInfo(
-                ProcessEventType::Started,
-                proc
+        auto ringIt =
+            trackedProcesses_.find(
+                pair.second.path
             );
 
-            continue;
+        if (ringIt != trackedProcesses_.end()) {
+            return ringIt->second.getAll();
         }
-
-        auto& runtime = runtimeIt->second;
-
-        double cpuDelta =
-            std::abs(proc.cpuUsage - runtime.lastCpu);
-
-        if (cpuDelta >= CPU_SPIKE_THRESHOLD)
-        {
-            logProcessInfo(
-                ProcessEventType::CpuSpike,
-                proc,
-                "delta=" + std::to_string(cpuDelta)
-            );
-        }
-
-        size_t memDelta = 0;
-
-        if (proc.memoryUsage > runtime.lastMemory)
-        {
-            memDelta =
-                proc.memoryUsage - runtime.lastMemory;
-        }
-
-        size_t memDeltaMb =
-            memDelta / (1024 * 1024);
-
-        if (memDeltaMb >= MEMORY_SPIKE_THRESHOLD_MB)
-        {
-            logProcessInfo(
-                ProcessEventType::MemorySpike,
-                proc,
-                "delta_mb=" + std::to_string(memDeltaMb)
-            );
-        }
-
-        runtime.lastCpu = proc.cpuUsage;
-        runtime.lastMemory = proc.memoryUsage;
-
-        runtime.lastSeen =
-            std::chrono::steady_clock::now();
     }
 
-    std::vector<uint32_t> deadProcesses;
+    return {};
+}
 
-    for (const auto& [pid, runtime] : runtimeProcesses_)
-    {
-        if (currentPids.contains(pid))
+MetricPoint TaskLogger::getLatestProcessPointByName(const std::string& name) const {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (const auto& pair : trackedList_) {
+
+        if (pair.second.name != name) {
             continue;
-   
-        Proc::ProcessEntry deadEntry;
+        }
 
-        deadEntry.pid = runtime.pid;
-        deadEntry.name = runtime.name;
-        deadEntry.path = runtime.path;
+        auto ringIt =
+            trackedProcesses_.find(
+                pair.second.path
+            );
 
-        logProcessInfo(
-            ProcessEventType::Exited,
-            deadEntry
+        if (ringIt != trackedProcesses_.end()) {
+            return ringIt->second.getLatest();
+        }
+    }
+
+    return {};
+}
+
+void TaskLogger::saveTrackedProcesses() {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::ofstream file(saveFile_);
+
+    if (!file.is_open()) {
+        return;
+    }
+
+    for (const auto& pair : trackedList_) {
+
+        const auto& proc = pair.second;
+
+        file
+            << proc.name << "|"
+            << proc.path << "|"
+            << proc.enable
+            << "\n";
+    }
+
+    file.close();
+}
+
+void TaskLogger::loadTrackedProcesses() {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::ifstream file(saveFile_);
+
+    if (!file.is_open()) {
+        return;
+    }
+
+    trackedList_.clear();
+
+    std::string line;
+
+    while (std::getline(file, line)) {
+
+        size_t p1 = line.find('|');
+        size_t p2 = line.rfind('|');
+
+        if (p1 == std::string::npos ||
+            p2 == std::string::npos ||
+            p1 == p2) {
+            continue;
+        }
+
+        TrackedProcess proc;
+
+        proc.name =
+            line.substr(0, p1);
+
+        proc.path =
+            line.substr(
+                p1 + 1,
+                p2 - p1 - 1
+            );
+
+        proc.enable =
+            std::stoi(
+                line.substr(p2 + 1)
+            );
+
+        trackedList_[proc.path] = proc;
+
+        if (!trackedProcesses_.count(proc.path)) {
+            trackedProcesses_[proc.path] =
+                ProcessRing{};
+        }
+    }
+
+    file.close();
+}
+
+void TaskLogger::updateLoop() {
+
+    while (running_) {
+
+        auto snapshot =
+            collector_.GetLastProcessSnapshot();
+
+        processSnapshot(snapshot);
+
+        std::this_thread::sleep_for(
+            std::chrono::seconds(1)
         );
-
-        deadProcesses.push_back(pid);
     }
+}
 
-    for (uint32_t pid : deadProcesses)
-    {
-        runtimeProcesses_.erase(pid);
+void TaskLogger::processSnapshot(const Proc::ProcessSnapshot& snapshot) {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (const auto& trackedPair : trackedList_) {
+
+        const auto& tracked =
+            trackedPair.second;
+
+        if (!tracked.enable) {
+            continue;
+        }
+
+        double totalCpu = 0.0;
+        uint64_t totalRam = 0;
+        uint16_t instances = 0;
+
+        for (const auto& proc : snapshot.topProcesses) {
+
+            if (proc.path != tracked.path) {
+                continue;
+            }
+
+            totalCpu += proc.cpuUsage;
+            totalRam += proc.memoryUsage;
+
+            instances++;
+        }
+
+        if (instances == 0) {
+            continue;
+        }
+
+        MetricPoint point;
+
+        point.timestamp = snapshot.timestampMs;
+
+        point.cpu = static_cast<float>(totalCpu);
+
+        point.ram = totalRam;
+
+        point.instances = instances;
+
+        trackedProcesses_[tracked.path].addEntry(point);
     }
 }

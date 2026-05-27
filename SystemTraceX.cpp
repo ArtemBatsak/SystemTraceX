@@ -6,7 +6,6 @@
 #include "src/web/web_helper.h"
 #include "src/collector/collector.h"
 #include "src/web/web.h"
-#include "src/logger/logger.h"
 #include "src/func/funk.h"
 
 
@@ -142,14 +141,14 @@ int WINAPI wWinMain(
     int nCmdShow
 )
 {
-    init_logging();
-
     Telemetry::TelemetryCollector collector("./telemetry_logs");
-    TaskLogger taskLogger;
+   
 
     WebTelemetryHelper webHelper(collector);
 
-    Web web(webHelper, &taskLogger);
+    std::this_thread::sleep_for(
+        std::chrono::seconds(2));
+    Web web(webHelper);
 
     globalWebPtr = &web;
 
@@ -158,10 +157,6 @@ int WINAPI wWinMain(
         {
             web.Start("0.0.0.0", WEB_PORT);
         });
-
-    std::this_thread::sleep_for(
-        std::chrono::seconds(2)
-    );
 
     // window class
     WNDCLASSEX wc = { 0 };
