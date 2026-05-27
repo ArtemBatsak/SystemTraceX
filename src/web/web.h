@@ -11,14 +11,14 @@
 
 class Web {
 public:
-    explicit Web(WebTelemetryHelper& webHelper_, TaskLogger* taskLogger = nullptr);
+    explicit Web(WebTelemetryHelper& webHelper_);
 
     void Start(const std::string& host = "0.0.0.0", int port = 8080);
     void Stop();
 
 private:
     WebTelemetryHelper& webHelper;
-    TaskLogger* taskLogger_;
+   // TaskLogger* taskLogger_;
     std::unique_ptr<httplib::Server> svr;
 };
 

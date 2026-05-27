@@ -1,9 +1,8 @@
 #include "web.h"
 
-#include "../logger/logger.h"
 
-Web::Web(WebTelemetryHelper& webHelper_, TaskLogger* taskLogger)
-    : webHelper(webHelper_), taskLogger_(taskLogger) {
+Web::Web(WebTelemetryHelper& webHelper_)
+    : webHelper(webHelper_) {
     svr = std::make_unique<httplib::Server>();
 }
 
@@ -43,32 +42,7 @@ void Web::Start(const std::string& host, int port) {
     svr->Get("/api/errors", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(webHelper.GetErrorsString(), "application/json");
     });
-    svr->Get("/api/logs", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content(AppLogger::ReadLogs(), "text/plain; charset=utf-8");
-    });
-
-    svr->Post("/api/processes/watch", [this](const httplib::Request& req, httplib::Response& res) {
-        if (!taskLogger_) {
-            res.status = 500;
-            res.set_content("{\"ok\":false,\"error\":\"TaskLogger not initialized\"}", "application/json");
-            return;
-        }
-
-        if (!req.has_param("pid")) {
-            res.status = 400;
-            res.set_content("{\"ok\":false,\"error\":\"Missing pid\"}", "application/json");
-            return;
-        }
-
-        try {
-            auto pid = static_cast<uint32_t>(std::stoul(req.get_param_value("pid")));
-            taskLogger_->addProcessPerPid(pid);
-            res.set_content("{\"ok\":true}", "application/json");
-        } catch (...) {
-            res.status = 400;
-            res.set_content("{\"ok\":false,\"error\":\"Invalid pid\"}", "application/json");
-        }
-    });
+    
 
     svr->listen(host.c_str(), port);
 }

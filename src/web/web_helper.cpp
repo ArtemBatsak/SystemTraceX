@@ -135,20 +135,20 @@ std::string WebTelemetryHelper::GetLiveWindowString()
         const auto& net = snap.network;
         const auto& disk = snap.disk;
 
-        // Считаем общий процент по RAM
+        
         double ramPercent = 0.0;
         if (ram.totalRAM > 0) {
             ramPercent = (static_cast<double>(ram.usedRAM) / ram.totalRAM) * 100.0;
         }
 
-        // Считаем общую емкость и занятое место по всем дискам для общего "disk": {"percent": ...}
+        
         unsigned long long totalDisksSize = 0;
         unsigned long long totalDisksUsed = 0;
 
         ss << "  {\n"
             << "    \"cpu\": " << cpu.totalUsage << ",\n";
 
-        // Собираем массив дисков внутри объекта
+        
         ss << "    \"disks\": [\n";
         for (size_t j = 0; j < disk.disks.size(); ++j)
         {
@@ -300,7 +300,8 @@ std::string WebTelemetryHelper::GetProcessesString()
             << "      \"name\": \"" << EscapeJsonString(p.name) << "\",\n"
             << "      \"cpuUsage\": " << p.cpuUsage << ",\n"
             << "      \"memoryUsage\": " << p.memoryUsage << ",\n"
-            << "      \"importanceScore\": " << p.importanceScore << "\n"
+            << "      \"importanceScore\": " << p.importanceScore << ",\n"
+            << "      \"path\":"<< p.path<<"\n"
             << "    }" << (i + 1 < limit ? "," : "") << "\n";
     }
 
