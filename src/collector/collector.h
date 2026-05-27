@@ -97,7 +97,6 @@ private:
     void StartWorker();
     void StopWorker();
     void WorkerLoop();
-    Proc::ProcessSnapshot CollectProcessSnapshot(uint64_t timestampMs);
     void PushLiveSnapshot(Snapshot snapshot, Proc::ProcessSnapshot processSnapshot);
 
     void AppendLongRecord(const AggregatedSnapshot& snap);

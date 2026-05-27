@@ -42,15 +42,11 @@ Snapshot TelemetryCollector::CollectRawSnapshot() {
 	return snapshot;
 }
 
-void TelemetryCollector::PushLiveSnapshot(Snapshot snapshot) {
-    auto processSnapshot = CollectProcessSnapshot(snapshot.timestampMs);
-    PushLiveSnapshot(std::move(snapshot), std::move(processSnapshot));
-}
-
 void TelemetryCollector::PushLiveSnapshot(Snapshot snapshot, Proc::ProcessSnapshot processSnapshot) {
     std::unique_lock<std::shared_mutex> lock(liveMutex_);
     lastProcessSnapshot_ = std::move(processSnapshot);
-    lastSnapshot_ = snapshot;
+    
+    lastSnapshot_ = std::move(snapshot);
     liveRing_.push_back(std::move(snapshot));
     if (liveRing_.size() > kLiveCapacity) {
         liveRing_.pop_front();
@@ -162,42 +158,27 @@ void TelemetryCollector::StopWorker() {
 }
 
 void TelemetryCollector::WorkerLoop() {
-    using Clock = std::chrono::steady_clock;
-    constexpr auto updateInterval = std::chrono::seconds(1);
-    constexpr auto idleCheckInterval = std::chrono::milliseconds(50);
-
-    int ticks = 0;
-    auto lastUpdateAt = Clock::now() - updateInterval;
-
+    int ticks = 1;
     while (workerRunning_.load()) {
-        const auto now = Clock::now();
-        if (now - lastUpdateAt >= updateInterval) {
-            lastUpdateAt = now;
 
-            auto snapshot = CollectRawSnapshot();
-            auto processSnapshot = CollectProcessSnapshot(snapshot.timestampMs);
+        auto snapshot = CollectRawSnapshot();
+        auto processSnapshot = Proc::GetSnapshot(0);
+            processSnapshot.timestampMs = snapshot.timestampMs;
             PushLiveSnapshot(std::move(snapshot), std::move(processSnapshot));
-
-            ++ticks;
+            // ---------------------------------------------------------
+            ticks++;
             if (ticks % 10 == 0) {
+
                 FlushTenSecondAggregation();
             }
             if (ticks % 60 == 0) {
                 FlushMinuteAggregation();
             }
-        }
 
-        std::unique_lock<std::mutex> lock(workerMutex_);
-        workerWake_.wait_for(lock, idleCheckInterval, [this] {
-            return !workerRunning_.load();
-        });
+            std::this_thread::sleep_for(
+                std::chrono::seconds(1)
+            );
     }
-}
-
-Proc::ProcessSnapshot TelemetryCollector::CollectProcessSnapshot(uint64_t timestampMs) {
-    auto snapshot = Proc::GetSnapshot(0);
-    snapshot.timestampMs = timestampMs;
-    return snapshot;
 }
 
 uint64_t TelemetryCollector::NowMs() {
