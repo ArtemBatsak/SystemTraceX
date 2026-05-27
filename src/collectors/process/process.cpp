@@ -48,8 +48,9 @@ namespace Proc {
         allProcesses.reserve(512);
 
         HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnap == INVALID_HANDLE_VALUE)
+        if (hSnap == INVALID_HANDLE_VALUE) {
             return snap;
+        }
 
         PROCESSENTRY32W pe{};
         pe.dwSize = sizeof(pe);
@@ -59,6 +60,7 @@ namespace Proc {
 
         uint64_t sysTime = FileTimeToUint64(kernel) + FileTimeToUint64(user);
 
+        // Lambda to update CPU usage history. PID is correctly uint32_t.
         auto addHistory = [&](uint32_t pid, uint64_t procTime) {
             g_cpuHistory[pid] = { procTime, sysTime };
             };
@@ -71,12 +73,13 @@ namespace Proc {
                 ProcessEntry entry;
                 entry.pid = pid;
 
-                // name (safe + fast)
+                // Name retrieval (safe and fast)
                 {
                     char buf[MAX_PATH];
                     int len = WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1, buf, MAX_PATH, nullptr, nullptr);
-                    if (len > 1)
+                    if (len > 1) {
                         entry.name.assign(buf, len - 1);
+                    }
                 }
 
                 HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
@@ -85,21 +88,23 @@ namespace Proc {
                     continue;
                 }
 
-                // memory + path
+                // Memory and Path retrieval (Path is dynamically allocated on the heap to prevent stack overflow)
                 {
                     PROCESS_MEMORY_COUNTERS pmc;
                     if (GetProcessMemoryInfo(hProc, &pmc, sizeof(pmc))) {
                         entry.memoryUsage = pmc.WorkingSetSize;
                     }
 
-                    char pathBuf[32768];
-                    DWORD size = sizeof(pathBuf);
-                    if (QueryFullProcessImageNameA(hProc, 0, pathBuf, &size)) {
-                        entry.path.assign(pathBuf, size);
+                    // CRITICAL FIX: Use std::vector for path buffer instead of large static array on the stack.
+                    std::vector<char> pathBuffer(32768);
+                    DWORD size = static_cast<DWORD>(pathBuffer.size());
+
+                    if (QueryFullProcessImageNameA(hProc, 0, pathBuffer.data(), &size)) {
+                        entry.path.assign(pathBuffer.data(), size);
                     }
                 }
 
-                // CPU
+                // CPU calculation
                 FILETIME c, e, k, u;
                 if (GetProcessTimes(hProc, &c, &e, &k, &u)) {
 
@@ -112,9 +117,16 @@ namespace Proc {
                         uint64_t sysDiff = sysTime - it->second.lastSystemTime;
 
                         if (sysDiff > 0) {
-                            entry.cpuUsage =
-                                (100.0 * (double)procDiff) / (double)sysDiff;
+                            entry.cpuUsage = static_cast<double>(procDiff) / static_cast<double>(sysDiff) * 100.0;
                         }
+                        else {
+                            // If time difference is zero, CPU usage cannot be calculated yet.
+                            entry.cpuUsage = 0.0;
+                        }
+                    }
+                    else {
+                        // First collection cycle: set initial CPU usage to 0.
+                        entry.cpuUsage = 0.0;
                     }
 
                     addHistory(pid, procTime);
@@ -123,25 +135,26 @@ namespace Proc {
                 CloseHandle(hProc);
 
                 double memMB = entry.memoryUsage / (1024.0 * 1024.0);
-                entry.importanceScore = entry.cpuUsage * 1.5 + memMB / 50.0;
+                // Calculate Importance Score
+                entry.importanceScore = entry.cpuUsage * 1.5 + static_cast<double>(memMB) / 50.0;
 
-                allProcesses.push_back(std::move(entry));
+                allProcesses.push_back(std::move(entry)); // Use move for efficiency
 
             } while (Process32NextW(hSnap, &pe));
         }
 
         CloseHandle(hSnap);
 
-        // cleanup dead PIDs 
+        // Cleanup dead PIDs from history
         {
             std::unordered_set<uint32_t> alive;
             alive.reserve(allProcesses.size());
 
-            for (auto& p : allProcesses)
+            for (const auto& p : allProcesses)
                 alive.insert(p.pid);
 
-            for (auto it = g_cpuHistory.begin(); it != g_cpuHistory.end();) {
-                if (!alive.contains(it->first))
+            for (auto it = g_cpuHistory.begin(); it != g_cpuHistory.end(); ) {
+                if (!alive.count(it->first))
                     it = g_cpuHistory.erase(it);
                 else
                     ++it;
@@ -150,25 +163,35 @@ namespace Proc {
 
         snap.totalProcesses = allProcesses.size();
 
-       std::partial_sort(
-            allProcesses.begin(),
-            allProcesses.begin() + std::min<size_t>(count_tasks > 0 ? count_tasks : allProcesses.size(), allProcesses.size()),
-            allProcesses.end(),
-            [](const ProcessEntry& a, const ProcessEntry& b) {
-                return a.importanceScore > b.importanceScore;
-            }
-        );
+        // --- Optimized Sorting Logic ---
+        auto compareFn = [](const ProcessEntry& a, const ProcessEntry& b) {
+            return a.importanceScore > b.importanceScore; // Sort by score descending
+            };
 
         if (count_tasks <= 0) {
+            // If no limit is set, sort all processes entirely and move them to the snapshot.
+            std::sort(allProcesses.begin(), allProcesses.end(), compareFn);
             snap.topProcesses = std::move(allProcesses);
         }
         else {
-            size_t count = std::min<size_t>(count_tasks, allProcesses.size());
-            snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
+            // Partial sorting: only sort up to 'count_tasks' limit for fast retrieval of Top N.
+            const size_t sortCount = (std::min)(static_cast<size_t>(count_tasks), allProcesses.size());
+
+            std::partial_sort(
+                allProcesses.begin(),
+                allProcesses.begin() + sortCount,
+                allProcesses.end(),
+                compareFn
+            );
+
+            // Assign only the sorted Top N results to the snapshot.
+            snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + sortCount);
         }
 
         return snap;
     }
+
+
 
 }
 #endif
