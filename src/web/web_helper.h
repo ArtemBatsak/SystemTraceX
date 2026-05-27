@@ -17,7 +17,7 @@ public:
     std::string GetLiveWindowString();
     std::string GetAggregatedWindowString(std::string type);
     std::string GetSnapshotString();
-    std::string GetProcessesString();
+    std::string GetProcessesString(int count);
     std::string GetErrorsString();
 
 private:

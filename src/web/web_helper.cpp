@@ -281,7 +281,7 @@ std::string WebTelemetryHelper::GetAggregatedWindowString(std::string type)
     return ss.str();
 }
 
-std::string WebTelemetryHelper::GetProcessesString()
+std::string WebTelemetryHelper::GetProcessesString(int count)
 {
 	auto processSnapshot = collector_.GetLastProcessSnapshot();
 
@@ -292,7 +292,7 @@ std::string WebTelemetryHelper::GetProcessesString()
 	ss << "  \"timestampMs\": " << processSnapshot.timestampMs << ",\n";
     ss << "  \"topProcesses\": [\n";
 
-    const size_t limit = (std::min)(static_cast<size_t>(40), processSnapshot.topProcesses.size());
+    const size_t limit = (std::min)(static_cast<size_t>(count), processSnapshot.topProcesses.size());
     for (size_t i = 0; i < limit; ++i) {
         const auto& p = processSnapshot.topProcesses[i];
         ss << "    {\n"
