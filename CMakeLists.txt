@@ -27,7 +27,6 @@ add_executable(SystemTraceX ${EXE_TYPE}
 
     src/web/web_helper.cpp
     src/web/web.cpp
-    src/logger/logger.cpp
     src/func/funk.cpp
 
     src/resource/resource.rc
