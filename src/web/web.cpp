@@ -37,7 +37,7 @@ void Web::Start(const std::string& host, int port) {
         res.set_content(webHelper.GetAggregatedWindowString("long"), "application/json");
     });
     svr->Get("/api/processes", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content(webHelper.GetProcessesString(), "application/json");
+        res.set_content(webHelper.GetProcessesString(10), "application/json");
     });
     svr->Get("/api/errors", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(webHelper.GetErrorsString(), "application/json");

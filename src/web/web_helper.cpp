@@ -300,8 +300,7 @@ std::string WebTelemetryHelper::GetProcessesString(int count)
             << "      \"name\": \"" << EscapeJsonString(p.name) << "\",\n"
             << "      \"cpuUsage\": " << p.cpuUsage << ",\n"
             << "      \"memoryUsage\": " << p.memoryUsage << ",\n"
-            << "      \"importanceScore\": " << p.importanceScore << ",\n"
-            << "      \"path\":"<< p.path<<"\n"
+            << "      \"importanceScore\": " << p.importanceScore << "\n"
             << "    }" << (i + 1 < limit ? "," : "") << "\n";
     }
 
