@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <vector>
 #include <string>
@@ -25,7 +25,7 @@ struct MetricPoint {
     uint16_t instances = 0;
 };
 
-constexpr size_t HISTORY_SIZE = 12 * 60 * 60;
+constexpr size_t HISTORY_SIZE = 100;
 
 struct ProcessRing {
     std::array<MetricPoint, HISTORY_SIZE> history{};
@@ -56,13 +56,12 @@ public:
     ~TaskLogger();
 
 public:
-
+	void start();
     void addProcessToTrack(
         const std::string& name,
         const std::string& path,
         bool enable = true
     );
-
     void removeProcessToTrack(const std::string& path);
 
     void setTrackEnabled(const std::string& path, bool enable);

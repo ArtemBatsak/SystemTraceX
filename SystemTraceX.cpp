@@ -145,10 +145,11 @@ int WINAPI wWinMain(
    
 
     WebTelemetryHelper webHelper(collector);
-
+    TaskLogger taskLogger(collector);
+    taskLogger.start();
     std::this_thread::sleep_for(
         std::chrono::seconds(2));
-    Web web(webHelper);
+    Web web(webHelper, taskLogger);
 
     globalWebPtr = &web;
 
@@ -244,7 +245,8 @@ int WINAPI wWinMain(
 int main() {
     Telemetry::TelemetryCollector collector("./telemetry_logs");
     WebTelemetryHelper webHelper(collector);
-    Web web(webHelper);
+    TaskLogger taskLogger(collector);
+    Web web(webHelper, taskLogger);
 
     std::cout << "SystemTraceX started on Linux. Press Ctrl+C to exit..." << std::endl;
 

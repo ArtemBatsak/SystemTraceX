@@ -284,7 +284,9 @@ std::string WebTelemetryHelper::GetAggregatedWindowString(std::string type)
 std::string WebTelemetryHelper::GetProcessesString(int count)
 {
 	auto processSnapshot = collector_.GetLastProcessSnapshot();
-
+	if (count == 0) {
+		count = processSnapshot.totalProcesses; 
+	}
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(6);
     ss << "{\n";
@@ -300,6 +302,7 @@ std::string WebTelemetryHelper::GetProcessesString(int count)
             << "      \"name\": \"" << EscapeJsonString(p.name) << "\",\n"
             << "      \"cpuUsage\": " << p.cpuUsage << ",\n"
             << "      \"memoryUsage\": " << p.memoryUsage << ",\n"
+            << "      \"path\": \"" << EscapeJsonString(p.path) << "\",\n"
             << "      \"importanceScore\": " << p.importanceScore << "\n"
             << "    }" << (i + 1 < limit ? "," : "") << "\n";
     }

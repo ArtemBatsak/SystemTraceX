@@ -1,4 +1,4 @@
-#include "funk.h"
+﻿#include "funk.h"
 #include "nlohmann/json.hpp"
 #include <fstream>
 
@@ -179,15 +179,10 @@ TaskLogger::TaskLogger(
 )
     : collector_(collector),
     saveFile_(saveFile),
-    running_(true) {
-
+    running_(true)
+{
     loadTrackedProcesses();
-
-    loggerThread_ =
-        std::thread(
-            &TaskLogger::updateLoop,
-            this
-        );
+	
 }
 
 TaskLogger::~TaskLogger() {
@@ -200,6 +195,10 @@ TaskLogger::~TaskLogger() {
 
     saveTrackedProcesses();
 }
+void TaskLogger::start() {
+	loggerThread_ = std::thread(&TaskLogger::updateLoop, this);
+}
+
 
 void TaskLogger::addProcessToTrack(
     const std::string& name,
