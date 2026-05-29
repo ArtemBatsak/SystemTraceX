@@ -451,6 +451,9 @@
     <div id="compact-drawer" class="compact-drawer">
         <button id="drawer-minimal-btn" class="btn" onclick="window.toggleMinimalMode()">📺 Standard View</button>
         <button id="drawer-freeze-btn" class="btn" onclick="window.toggleFreezeMode()">⏸ Pause Updates</button>
+        <button class="btn" onclick="window.location.href='/tasks'">📋 Task Manager</button>
+        <button id="drawer-show-charts-btn" class="btn" onclick="window.toggleChartsDisplay()">📈 Show Graphs</button>
+        <button id="drawer-submit-tasks-btn" class="btn" onclick="window.sendDataToTasks('/tasks')">📤 Send to Tasks</button>
         <div style="display: flex; flex-direction: column; gap: 4px;">
             <label style="color: var(--text-muted); font-size: 0.8rem;">Analytics:</label>
             <select class="chart-select" onchange="window.handleChartModeChange(this.value); window.syncSelects(this.value)">
@@ -476,6 +479,7 @@
         <div class="controls-group">
             <button id="toggle-minimal-btn" class="btn" onclick="window.toggleMinimalMode()">✨ Compact View</button>
             <button id="freeze-btn" class="btn" onclick="window.toggleFreezeMode()">⏸ Pause Updates</button>
+            <button class="btn" onclick="window.location.href='/tasks'" title="Task Manager">📋 Tasks</button>
 
             <div style="position: relative;" class="standard-burger-container">
                 <button class="btn" onclick="window.toggleStandardBurger(event)">⚙️ Layout</button>

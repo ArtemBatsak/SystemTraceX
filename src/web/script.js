@@ -243,16 +243,16 @@ async function loadLiveHistoryAndSetupChart() {
         metricDataHistory['gpu'] = gpuData;
 
         const series = [
-            { name: 'CPU', type: 'line', showSymbol: false, data: cpuData, itemStyle: { color: '#ff9f43' }, lineStyle: { width: 2 } }, 
-            { name: 'RAM', type: 'line', showSymbol: false, data: ramData, itemStyle: { color: '#10ac84' }, lineStyle: { width: 2 } }, 
-            { name: 'GPU', type: 'line', showSymbol: false, data: gpuData, itemStyle: { color: '#0abde3' }, lineStyle: { width: 2 } }
+            { id: 'cpu', name: 'CPU', type: 'line', showSymbol: false, data: cpuData, itemStyle: { color: '#ff9f43' }, lineStyle: { width: 2 }, animation: false }, 
+            { id: 'ram', name: 'RAM', type: 'line', showSymbol: false, data: ramData, itemStyle: { color: '#10ac84' }, lineStyle: { width: 2 }, animation: false }, 
+            { id: 'gpu', name: 'GPU', type: 'line', showSymbol: false, data: gpuData, itemStyle: { color: '#0abde3' }, lineStyle: { width: 2 }, animation: false }
         ];
 
         Object.keys(diskTracesData).forEach(diskName => {
             metricDataHistory[diskName] = diskTracesData[diskName];
             const color = DISK_COLORS[diskColorIndex % DISK_COLORS.length];
             diskColorIndex++;
-            series.push({ name: `${diskName} Utilization`, type: 'line', showSymbol: false, data: diskTracesData[diskName], itemStyle: { color: color }, lineStyle: { width: 1.5 } });
+            series.push({ id: diskName, name: `${diskName} Utilization`, type: 'line', showSymbol: false, data: diskTracesData[diskName], itemStyle: { color: color }, lineStyle: { width: 1.5 }, animation: false });
         });
 
         const options = createBaseChartConfig('Resource Usage Timeline (%)', series);
@@ -275,6 +275,34 @@ async function loadAggregatedHistoryAndSetupChart(apiUrl) {
             return;
         }
 
+        // Строим множество сессий с их границами для определения пробелов
+        // Сначала собираем сессионные интервалы из SessionStart/SessionEnd
+        const sessionRanges = [];
+        const sessionMap = {};
+        dataArray.forEach(p => {
+            if (p.type === 'SessionStart') {
+                sessionMap[p.windowStartMs] = { start: p.windowStartMs };
+            } else if (p.type === 'SessionEnd') {
+                const key = p.windowStartMs;
+                if (sessionMap[key]) {
+                    sessionMap[key].end = p.windowEndMs;
+                    sessionRanges.push({ start: sessionMap[key].start, end: p.windowEndMs });
+                    delete sessionMap[key];
+                }
+            }
+        });
+        // Сортируем сессии по времени старта
+        sessionRanges.sort((a, b) => a.start - b.start);
+
+        // Функция: принадлежит ли timestamp какой-либо сессии
+        function isInSession(ts) {
+            for (const s of sessionRanges) {
+                if (ts >= s.start && ts <= s.end) return true;
+                if (s.start > ts) break;
+            }
+            return false;
+        }
+
         const metricsPoints = dataArray.filter(p => p.type === 'Metric');
         if (metricsPoints.length === 0) {
             setupEmptyMasterChart();
@@ -289,17 +317,46 @@ async function loadAggregatedHistoryAndSetupChart(apiUrl) {
 
         const divisor = globalTotalRamBytes > 0 ? globalTotalRamBytes : 16 * 1024 * 1024 * 1024; 
         let lastTimestamp = null;
+        let lastSessionEnd = null;
 
+        // Определяем к какой сессии принадлежит каждая метрика
+        // Между сессиями вставляем null-разрывы
         metricsPoints.forEach(point => {
             const midTime = Math.floor((point.windowStartMs + point.windowEndMs) / 2);
 
-            if (lastTimestamp !== null && (midTime - lastTimestamp) > MAX_ALLOWED_GAP_MS) {
-                const stepGapTimestamp = lastTimestamp + 1000; 
-                cpuAvg.push([stepGapTimestamp, null]); cpuMin.push([stepGapTimestamp, null]); cpuMax.push([stepGapTimestamp, null]);
-                gpuAvg.push([stepGapTimestamp, null]); gpuMin.push([stepGapTimestamp, null]); gpuMax.push([stepGapTimestamp, null]);
-                ramAvg.push([stepGapTimestamp, null]); ramMax.push([stepGapTimestamp, null]); ramMax.push([stepGapTimestamp, null]);
+            // Найти сессию к которой принадлежит эта метрика
+            let currentSessionEnd = null;
+            for (const s of sessionRanges) {
+                if (midTime >= s.start && midTime <= s.end) {
+                    currentSessionEnd = s.end;
+                    break;
+                }
             }
+
+            // Вставляем разрыв (null) если:
+            // 1. Явный пробел между сессиями (перешли в новую сессию)
+            // 2. Большой временной гэп
+            let needsBreak = false;
+            if (lastTimestamp !== null) {
+                const gap = midTime - lastTimestamp;
+                if (gap > MAX_ALLOWED_GAP_MS) {
+                    needsBreak = true;
+                } else if (lastSessionEnd !== null && currentSessionEnd !== null && lastSessionEnd !== currentSessionEnd) {
+                    // Сменилась сессия — разрыв
+                    needsBreak = true;
+                }
+            }
+
+            if (needsBreak) {
+                // Null точка сразу после последней — разрывает линию
+                const gapTs = lastTimestamp + 1000;
+                cpuAvg.push([gapTs, null]); cpuMin.push([gapTs, null]); cpuMax.push([gapTs, null]);
+                gpuAvg.push([gapTs, null]); gpuMin.push([gapTs, null]); gpuMax.push([gapTs, null]);
+                ramAvg.push([gapTs, null]); ramMin.push([gapTs, null]); ramMax.push([gapTs, null]);
+            }
+
             lastTimestamp = midTime;
+            lastSessionEnd = currentSessionEnd;
 
             cpuAvg.push([midTime, point.cpu ? point.cpu.avg : 0]);
             cpuMax.push([midTime, point.cpu ? point.cpu.max : 0]);
@@ -319,15 +376,15 @@ async function loadAggregatedHistoryAndSetupChart(apiUrl) {
         });
 
         const series = [
-            { name: 'CPU Avg', type: 'line', showSymbol: false, data: cpuAvg, itemStyle: { color: '#ff9f43' }, lineStyle: { width: 2.5 } },
-            { name: 'CPU Max', type: 'line', showSymbol: false, data: cpuMax, itemStyle: { color: '#ffb142' }, lineStyle: { width: 1, type: 'dashed' } },
-            { name: 'CPU Min', type: 'line', showSymbol: false, data: cpuMin, itemStyle: { color: '#cc8e35' }, lineStyle: { width: 1, type: 'dashed' } },
-            { name: 'RAM Avg', type: 'line', showSymbol: false, data: ramAvg, itemStyle: { color: '#10ac84' }, lineStyle: { width: 2.5 } },
-            { name: 'RAM Max', type: 'line', showSymbol: false, data: ramMax, itemStyle: { color: '#1dd1a1' }, lineStyle: { width: 1, type: 'dashed' } },
-            { name: 'RAM Min', type: 'line', showSymbol: false, data: ramMin, itemStyle: { color: '#108564' }, lineStyle: { width: 1, type: 'dashed' } },
-            { name: 'GPU Avg', type: 'line', showSymbol: false, data: gpuAvg, itemStyle: { color: '#0abde3' }, lineStyle: { width: 2.5 } },
-            { name: 'GPU Max', type: 'line', showSymbol: false, data: gpuMax, itemStyle: { color: '#48dbfb' }, lineStyle: { width: 1, type: 'dashed' } },
-            { name: 'GPU Min', type: 'line', showSymbol: false, data: gpuMin, itemStyle: { color: '#0197b5' }, lineStyle: { width: 1, type: 'dashed' } }
+            { name: 'CPU Avg', type: 'line', showSymbol: false, data: cpuAvg, itemStyle: { color: '#ff9f43' }, lineStyle: { width: 2.5 }, connectNulls: false },
+            { name: 'CPU Max', type: 'line', showSymbol: false, data: cpuMax, itemStyle: { color: '#ffb142' }, lineStyle: { width: 1, type: 'dashed' }, connectNulls: false },
+            { name: 'CPU Min', type: 'line', showSymbol: false, data: cpuMin, itemStyle: { color: '#cc8e35' }, lineStyle: { width: 1, type: 'dashed' }, connectNulls: false },
+            { name: 'RAM Avg', type: 'line', showSymbol: false, data: ramAvg, itemStyle: { color: '#10ac84' }, lineStyle: { width: 2.5 }, connectNulls: false },
+            { name: 'RAM Max', type: 'line', showSymbol: false, data: ramMax, itemStyle: { color: '#1dd1a1' }, lineStyle: { width: 1, type: 'dashed' }, connectNulls: false },
+            { name: 'RAM Min', type: 'line', showSymbol: false, data: ramMin, itemStyle: { color: '#108564' }, lineStyle: { width: 1, type: 'dashed' }, connectNulls: false },
+            { name: 'GPU Avg', type: 'line', showSymbol: false, data: gpuAvg, itemStyle: { color: '#0abde3' }, lineStyle: { width: 2.5 }, connectNulls: false },
+            { name: 'GPU Max', type: 'line', showSymbol: false, data: gpuMax, itemStyle: { color: '#48dbfb' }, lineStyle: { width: 1, type: 'dashed' }, connectNulls: false },
+            { name: 'GPU Min', type: 'line', showSymbol: false, data: gpuMin, itemStyle: { color: '#0197b5' }, lineStyle: { width: 1, type: 'dashed' }, connectNulls: false }
         ];
 
         const options = createBaseChartConfig('Historical Consolidated Operational Analysis (%)', series);
@@ -375,7 +432,7 @@ function addNewDiskTrace(diskName, currentTimestamp) {
     if (eChartInstance && currentChartMode === 'live') {
         const currentOptions = eChartInstance.getOption();
         currentOptions.series.push({
-            name: `${diskName} Utilization`, type: 'line', showSymbol: false, data: paddingData, itemStyle: { color: color }, lineStyle: { width: 1.5 }
+            id: diskName, name: `${diskName} Utilization`, type: 'line', showSymbol: false, data: paddingData, itemStyle: { color: color }, lineStyle: { width: 1.5 }, animation: false
         });
         eChartInstance.setOption(currentOptions);
     }
@@ -392,13 +449,19 @@ function pushDataToBuffer(traceName, newValue) {
 
 function redrawMasterChart() {
     if (!window.chartCache || !eChartInstance || currentChartMode !== 'live' || isUiFrozen) return;
-    const seriesUpdates = Object.keys(metricDataHistory).map(key => {
+    
+    // Плавное обновление: только последние точки каждой серии, без полной перерисовки
+    const seriesKeys = Object.keys(metricDataHistory);
+    const seriesUpdates = seriesKeys.map((key, index) => {
+        const buf = metricDataHistory[key];
         return {
-            name: key === 'cpu' || key === 'ram' || key === 'gpu' ? key.toUpperCase() : `${key} Utilization`,
-            data: metricDataHistory[key]
+            // Используем индекс серии для адресации
+            id: key,
+            data: buf
         };
     });
-    eChartInstance.setOption({ series: seriesUpdates });
+    // notMerge: false — дополняем данные плавно, не пересоздаём
+    eChartInstance.setOption({ series: seriesUpdates }, { replaceMerge: [] });
 }
 
 

@@ -250,9 +250,6 @@ void Web::Start(const std::string& host, int port) {
     svr->Get("/api/processes/all", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(webHelper.GetProcessesString(0), "application/json");
     });
-    svr->Get("/api/errors", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content(webHelper.GetErrorsString(), "application/json");
-    });
 
     svr->Get("/api/task-logger/tracked", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(GetTrackedProcessesString(false), "application/json");
