@@ -47,7 +47,7 @@ void TelemetryCollector::PushLiveSnapshot(Snapshot snapshot, Proc::ProcessSnapsh
     lastProcessSnapshot_ = std::move(processSnapshot);
     
     lastSnapshot_ = std::move(snapshot);
-    liveRing_.push_back(std::move(snapshot));
+    liveRing_.push_back(lastSnapshot_);
     if (liveRing_.size() > kLiveCapacity) {
         liveRing_.pop_front();
     }

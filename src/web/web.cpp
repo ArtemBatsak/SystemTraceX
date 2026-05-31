@@ -236,6 +236,7 @@ void Web::Start(const std::string& host, int port) {
         res.set_content(webHelper.GetSnapshotString(), "application/json");
     });
     svr->Get("/api/telemetry/live", [this](const httplib::Request&, httplib::Response& res) {
+        auto test = webHelper.GetLiveWindowString();
         res.set_content(webHelper.GetLiveWindowString(), "application/json");
     });
     svr->Get("/api/telemetry/24h", [this](const httplib::Request&, httplib::Response& res) {

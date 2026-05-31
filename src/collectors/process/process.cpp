@@ -199,117 +199,205 @@ namespace Proc {
     // LINUX IMPLEMENTATION
     // ==========================================================
 #ifdef __linux__
+
 #include <dirent.h>
 #include <unistd.h>
+#include <limits.h>
 #include <sys/types.h>
-#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <map>
+#include <algorithm>
+#include <cctype>
+
 namespace Proc {
-        struct LinuxCpuHistory {
-            unsigned long long utime;
-            unsigned long long stime;
-            unsigned long long totalTime;
-        };
 
-        static std::map<uint32_t, LinuxCpuHistory> g_linuxCpuHistory;
+    struct LinuxCpuHistory {
+        unsigned long long utime;
+        unsigned long long stime;
+        unsigned long long totalTime;
+    };
 
-        // Returns total system CPU time from /proc/stat
-        unsigned long long GetTotalCpuTime() {
-            std::ifstream file("/proc/stat");
-            std::string cpu;
-            unsigned long long user, nice, system, idle, iowait, irq, softirq, steal;
-            if (!(file >> cpu >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal)) return 0;
-            return user + nice + system + idle + iowait + irq + softirq + steal;
-        }
+    static std::map<uint32_t, LinuxCpuHistory> g_linuxCpuHistory;
 
-        ProcessSnapshot GetSnapshot(const int count_tasks) {
-            ProcessSnapshot snap;
-            std::vector<ProcessEntry> allProcesses;
-            unsigned long long systemTime = GetTotalCpuTime();
-            long pageSize = sysconf(_SC_PAGESIZE);
+    // ================= CPU TOTAL TIME =================
+    unsigned long long GetTotalCpuTime() {
+        std::ifstream file("/proc/stat");
 
-            DIR* dir = opendir("/proc");
-            if (!dir) return snap;
+        std::string cpu;
+        unsigned long long user, nice, system, idle, iowait, irq, softirq, steal;
 
-            struct dirent* entry;
-            while ((entry = readdir(dir)) != nullptr) {
-                // Skip entries that are not PID directories
-                if (!isdigit(entry->d_name[0])) continue;
+        if (!(file >> cpu >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal))
+            return 0;
 
-                uint32_t pid = std::stoi(entry->d_name);
-                ProcessEntry p;
-                p.pid = pid;
+        return user + nice + system + idle + iowait + irq + softirq + steal;
+    }
 
-                // 1. Read process name from /comm
-                std::string commPath = "/proc/" + std::to_string(pid) + "/comm";
-                std::ifstream commFile(commPath);
-                if (commFile.is_open()) {
-                    std::getline(commFile, p.name);
+    // ================= SAFE STAT PARSER =================
+    static bool ParseStat(const std::string& path,
+        unsigned long long& utime,
+        unsigned long long& stime)
+    {
+        std::ifstream file(path);
+        if (!file.is_open())
+            return false;
+
+        std::string line;
+        std::getline(file, line);
+
+        size_t rparen = line.rfind(')');
+        if (rparen == std::string::npos)
+            return false;
+
+        std::string rest = line.substr(rparen + 2);
+        std::istringstream iss(rest);
+
+        std::string state;
+        iss >> state;
+
+        unsigned long long tmp;
+
+        for (int i = 0; i < 11; ++i)
+            iss >> tmp;
+
+        iss >> utime >> stime;
+
+        return true;
+    }
+
+    // ================= MAIN SNAPSHOT =================
+    ProcessSnapshot GetSnapshot(const int count_tasks)
+    {
+        ProcessSnapshot snap;
+        std::vector<ProcessEntry> allProcesses;
+
+        unsigned long long systemTime = GetTotalCpuTime();
+        long pageSize = sysconf(_SC_PAGESIZE);
+
+        DIR* dir = opendir("/proc");
+        if (!dir)
+            return snap;
+
+        struct dirent* entry;
+
+        while ((entry = readdir(dir)) != nullptr)
+        {
+            if (!isdigit(entry->d_name[0]))
+                continue;
+
+            uint32_t pid = std::stoi(entry->d_name);
+
+            ProcessEntry p;
+            p.pid = pid;
+
+            // ================= NAME =================
+            {
+                std::ifstream f("/proc/" + std::to_string(pid) + "/comm");
+                if (!f.is_open())
+                    continue;
+
+                std::getline(f, p.name);
+            }
+
+            // ================= PATH =================
+            {
+                std::string link = "/proc/" + std::to_string(pid) + "/exe";
+
+                char buf[PATH_MAX];
+                ssize_t len = readlink(link.c_str(), buf, sizeof(buf) - 1);
+
+                if (len > 0) {
+                    buf[len] = '\0';
+                    p.path = buf;
                 }
                 else {
-                    continue; // If unreadable, the process likely exited
+                    p.path = "";
                 }
+            }
 
-                // 2. Read resident memory from /statm (in pages)
-                std::string statmPath = "/proc/" + std::to_string(pid) + "/statm";
-                std::ifstream statmFile(statmPath);
+            // ================= MEMORY =================
+            {
+                std::ifstream f("/proc/" + std::to_string(pid) + "/statm");
+
                 unsigned long long dummy, resident;
-                if (statmFile >> dummy >> resident) {
+
+                if (f >> dummy >> resident) {
                     p.memoryUsage = resident * pageSize;
                 }
+            }
 
-                // 3. Read CPU ticks from /stat
+            // ================= CPU =================
+            {
+                unsigned long long utime = 0, stime = 0;
+
                 std::string statPath = "/proc/" + std::to_string(pid) + "/stat";
-                std::ifstream statFile(statPath);
-                if (statFile.is_open()) {
-                    std::string tmp;
-                    unsigned long long utime, stime;
 
-                    // Skip the first 13 fields before utime
-                    // (the process name field in parentheses may include spaces, so /stat parsing is tricky,
-                    // but this approach is sufficient for numeric fields after the 13th one)
-                    for (int i = 0; i < 13; ++i) statFile >> tmp;
-                    if (statFile >> utime >> stime) {
-                        unsigned long long procTime = utime + stime;
-                        if (g_linuxCpuHistory.count(pid)) {
-                            unsigned long long procDiff = procTime - (g_linuxCpuHistory[pid].utime + g_linuxCpuHistory[pid].stime);
-                            unsigned long long sysDiff = systemTime - g_linuxCpuHistory[pid].totalTime;
-                            if (sysDiff > 0) {
-                                p.cpuUsage = (100.0 * (double)procDiff) / (double)sysDiff;
-                            }
+                if (ParseStat(statPath, utime, stime))
+                {
+                    unsigned long long procTime = utime + stime;
+
+                    auto it = g_linuxCpuHistory.find(pid);
+
+                    if (it != g_linuxCpuHistory.end())
+                    {
+                        unsigned long long prev =
+                            it->second.utime + it->second.stime;
+
+                        unsigned long long procDiff = procTime - prev;
+                        unsigned long long sysDiff = systemTime - it->second.totalTime;
+
+                        if (sysDiff > 0)
+                        {
+                            p.cpuUsage =
+                                (100.0 * (double)procDiff) /
+                                (double)sysDiff;
                         }
-                        g_linuxCpuHistory[pid] = { utime, stime, systemTime };
                     }
+
+                    g_linuxCpuHistory[pid] = { utime, stime, systemTime };
                 }
-
-                // 4. Compute process importance score
-                double memMB = (double)p.memoryUsage / (1024.0 * 1024.0);
-                p.importanceScore = (p.cpuUsage * 1.5) + (memMB / 50.0);
-
-                allProcesses.push_back(p);
-            }
-            closedir(dir);
-
-            snap.totalProcesses = allProcesses.size();
-
-            // Sort by descending importance
-            std::sort(allProcesses.begin(), allProcesses.end(), [](const ProcessEntry& a, const ProcessEntry& b) {
-                return a.importanceScore > b.importanceScore;
-                });
-
-            if (count_tasks <= 0) {
-                snap.topProcesses = allProcesses;
-            }
-            else {
-                size_t count = (std::min)((size_t)count_tasks, allProcesses.size());
-                snap.topProcesses.assign(allProcesses.begin(), allProcesses.begin() + count);
             }
 
-            // Periodically clear history to avoid keeping closed process entries
-            if (g_linuxCpuHistory.size() > 2000) {
-                g_linuxCpuHistory.clear();
-            }
+            // ================= SCORE =================
+            double memMB = (double)p.memoryUsage / (1024.0 * 1024.0);
 
-            return snap;
+            p.importanceScore =
+                (p.cpuUsage * 1.5) +
+                (memMB / 50.0);
+
+            allProcesses.push_back(std::move(p));
         }
+
+        closedir(dir);
+
+        snap.totalProcesses = allProcesses.size();
+
+        std::sort(allProcesses.begin(), allProcesses.end(),
+            [](const ProcessEntry& a, const ProcessEntry& b)
+            {
+                return a.importanceScore > b.importanceScore;
+            });
+
+        if (count_tasks <= 0)
+            snap.topProcesses = std::move(allProcesses);
+        else
+        {
+            size_t count = std::min(
+                (size_t)count_tasks,
+                allProcesses.size());
+
+            snap.topProcesses.assign(
+                allProcesses.begin(),
+                allProcesses.begin() + count);
+        }
+
+        if (g_linuxCpuHistory.size() > 2000)
+            g_linuxCpuHistory.clear();
+
+        return snap;
     }
+
+} // namespace Proc
+
 #endif

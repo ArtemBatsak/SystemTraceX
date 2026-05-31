@@ -42,48 +42,7 @@ private:
 static std::string ReadFile(const std::string& path) {
     namespace fs = std::filesystem;
 
-    fs::path resolvedPath = path;
-    std::error_code ec;
-    fs::path cursor = fs::current_path(ec);
-
-    if (!ec) {
-        while (true) {
-            const fs::path sourcePath = cursor / "src" / path;
-            if (fs::exists(sourcePath, ec) && !ec) {
-                resolvedPath = sourcePath;
-                break;
-            }
-
-            const fs::path parent = cursor.parent_path();
-            if (parent == cursor) {
-                break;
-            }
-            cursor = parent;
-        }
-    }
-
-    if (resolvedPath == path && !fs::exists(resolvedPath, ec)) {
-        ec.clear();
-        cursor = fs::current_path(ec);
-
-        if (!ec) {
-            while (true) {
-                const fs::path bundledPath = cursor / path;
-                if (fs::exists(bundledPath, ec) && !ec) {
-                    resolvedPath = bundledPath;
-                    break;
-                }
-
-                const fs::path parent = cursor.parent_path();
-                if (parent == cursor) {
-                    break;
-                }
-                cursor = parent;
-            }
-        }
-    }
-
-    std::ifstream file(resolvedPath, std::ios::binary);
+    std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) return "";
 
     std::stringstream buffer;
