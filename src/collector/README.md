@@ -1,147 +1,184 @@
-# Collector Module Guide
+# Collector Module
 
-This README explains:
+`Telemetry::TelemetryCollector` is the central data pipeline for SystemTraceX. It reads raw system metrics from the collector modules, keeps a short live history in memory, builds aggregated history, and records long-range telemetry to binary files.
 
-1. What data is produced by all collector modules (`src/collectors/*`),
-2. How the main collector `Telemetry::TelemetryCollector` works (`src/collector/collector.h`).
+## What It Collects
 
-## 1) Data produced by each collector
+The main `Telemetry::Snapshot` contains:
 
-The main `Telemetry::Snapshot` contains 5 blocks:
+| Field | Source | Description |
+| --- | --- | --- |
+| `timestampMs` | Collector clock | Unix timestamp in milliseconds. |
+| `cpu` | `CPU::GetSnapshot()` | CPU name, total usage, per-core usage, and core count. |
+| `gpu` | `GPU::GetSnapshots()` | Detected GPUs, usage, VRAM values, vendor, and adapter flags. |
+| `memory` | `Memory::GetSnapshot()` | Total, used, and free RAM; commit/swap fields where available. |
+| `disk` | `Disk::GetSnapshot()` | Disk names, total bytes, and free bytes. |
+| `network` | `Net::GetSnapshot()` | Per-interface and total RX/TX rates. |
+| `system` | `SystemInfo::GetSnapshot()` | OS, kernel, hostname, uptime, architecture, and virtualization data. |
 
-- `cpu` from `CPU::GetSnapshot()`
-- `memory` from `Memory::GetSnapshot()`
-- `disk` from `Disk::GetSnapshot()`
-- `network` from `Net::GetSnapshot()`
-- `system` from `SystemInfo::GetSnapshot()`
+The collector also stores the latest process snapshot from `Proc::GetSnapshot(0)` so the web layer and process logger can read process telemetry.
 
-### CPU collector (`src/collectors/cpu`)
+## Lifecycle
 
-`CPU::CpuSnapshot` fields:
-
-- `totalUsage` — total CPU usage in percent,
-- `perCoreUsage` — per-core usage values,
-- `coreCount` — number of cores,
-- `cpuname` — CPU model/name.
-
-Important: `CPU::Update()` is called before reading the CPU snapshot.
-
-### RAM collector (`src/collectors/ram`)
-
-`Memory::MemorySnapshot` fields:
-
-- `totalRAM` — total RAM,
-- `usedRAM` — used RAM,
-- `freeRAM` — free RAM,
-- `commitLimit` — commit/swap limit,
-- `commitUsed` — used commit/swap.
-
-### Disk collector (`src/collectors/disk`)
-
-`Disk::DiskSystemSnapshot` fields:
-
-- `disks` — list of `Disk::DiskSnapshot`:
-  - `name` — disk name/mount,
-  - `freeBytes` — free bytes,
-  - `totalBytes` — total bytes.
-
-### Network collector (`src/collectors/network`)
-
-`Net::NetworkSnapshot` fields:
-
-- `totalRxPerSec` — total incoming traffic (B/s),
-- `totalTxPerSec` — total outgoing traffic (B/s),
-- `interfaces` — list of `InterfaceSnapshot`:
-  - `name`, `ipv4`,
-  - `rxBytesPerSec`, `txBytesPerSec`,
-  - `rxTotalBytes`, `txTotalBytes`,
-  - `isLoopback`, `isUp`.
-
-### SystemInfo collector (`src/collectors/systeminfo`)
-
-`SystemInfo::SystemSnapshot` fields:
-
-- `osName`, `kernelVersion`, `hostname`,
-- `cpuName`, `uptimeSeconds`, `architecture`,
-- `virtualization`:
-  - `hypervisorPresent`,
-  - `runningInVM`,
-  - `vendor`.
-
----
-
-## 2) Main collector: `Telemetry::TelemetryCollector`
-
-`TelemetryCollector` builds a unified `Snapshot`, keeps a live window, and stores aggregated history.
-
-### Class declaration and helper wiring
+Create a collector with a log directory:
 
 ```cpp
-Telemetry::TelemetryCollector collector("./telemetry_logs");
-Web::WebTelemetryHelper webHelper(collector);
-```
+#include "collector/collector.h"
 
-### Core workflow
-
-Creating the collector starts its background update thread automatically:
-
-```cpp
 Telemetry::TelemetryCollector collector("./telemetry_logs");
 ```
 
-After that, other threads can read data through getters without manually driving
-the collector loop.
+The constructor:
 
-### Key methods
+1. Creates the log directory if it does not exist.
+2. Recovers the previous session if the application exited without writing `SessionEnd`.
+3. Rotates the long-range telemetry file if it is too large.
+4. Writes a `SessionStart` record.
+5. Starts the background worker thread.
 
-- `CollectRawSnapshot()`
-  - Creates `Telemetry::Snapshot` and fills `timestampMs`,
-  - calls CPU/RAM/Disk/Network/SystemInfo collectors,
-  - returns one combined snapshot.
+The destructor stops the worker thread and writes a `SessionEnd` record.
 
-- `PushLiveSnapshot(Snapshot snapshot)`
-  - Updates `lastSnapshot_`,
-  - appends to `liveRing_`,
-  - keeps at most `kLiveCapacity` entries.
+## Background Worker
 
-- `FlushTenSecondAggregation()`
-  - Uses the latest 10 live snapshots,
-  - computes avg/min/max for CPU, RAM, RX, TX,
-  - pushes to `tenSecRing_`,
-  - writes `telemetry_10s.bin`.
+The worker runs once per second:
 
-- `FlushMinuteAggregation()`
-  - Uses the latest six 10-second aggregates,
-  - computes 1-minute avg/min/max aggregate,
-  - appends binary record to `telemetry_long.bin`.
+1. Calls `CollectRawSnapshot()`.
+2. Calls `Proc::GetSnapshot(0)` to capture the full process list.
+3. Updates the latest snapshot and the live ring buffer.
+4. Every 10 ticks, calls `FlushTenSecondAggregation()`.
+5. Every 60 ticks, calls `FlushMinuteAggregation()`.
 
-- Long-range file rotation:
-  - On startup, if `telemetry_long.bin` is larger than 1 MB, collector removes
-    previous `telemetry_long-1.bin` (if present), renames current file to
-    `telemetry_long-1.bin`, and starts writing to a fresh `telemetry_long.bin`.
-  - During runtime, before appending next record, if `telemetry_long.bin` is
-    larger than 2 MB, collector forcibly closes the current session with
-    `SessionEnd`, rotates file to `telemetry_long-1.bin`, writes `SessionStart`
-    to a new `telemetry_long.bin`, then continues normal writes.
+The live buffer capacity is `kLiveCapacity` (`600` samples), which is approximately 10 minutes at one sample per second.
 
-- Read methods:
-  - `GetLastSnapshot()` — last live snapshot,
-  - `GetLiveWindow()` — live ring as vector,
-  - `GetRecent24Hours()` — 10-second aggregate series,
-  - `GetLongRange()` — minute aggregate series merged from
-    `telemetry_long-1.bin` first and `telemetry_long.bin` second.
+The 10-second aggregation ring capacity is `kTenSecCapacity` (`8640` records), which is approximately 24 hours.
 
-### Short loop example
+## Public API
+
+### `CollectRawSnapshot()`
+
+Collects one immediate `Telemetry::Snapshot`.
+
+This method is used internally by the worker, but it can also be called directly when a one-off snapshot is needed.
 
 ```cpp
-#include "collector.h"
-#include "../web/web_helper.h"
+Telemetry::Snapshot snapshot = collector.CollectRawSnapshot();
+```
+
+### `GetLastSnapshot()`
+
+Returns the most recent live snapshot.
+
+```cpp
+auto snapshot = collector.GetLastSnapshot();
+double cpu = snapshot.cpu.totalUsage;
+uint64_t usedRam = snapshot.memory.usedRAM;
+```
+
+### `GetLiveWindow()`
+
+Returns the current live ring as a vector of raw snapshots.
+
+```cpp
+std::vector<Telemetry::Snapshot> live = collector.GetLiveWindow();
+```
+
+Use this for realtime charts, dashboard bootstrapping, and short rolling analysis.
+
+### `GetRecent24Hours()`
+
+Returns the in-memory 10-second aggregated records.
+
+```cpp
+std::vector<Telemetry::AggregatedSnapshot> day = collector.GetRecent24Hours();
+```
+
+Each record contains average/min/max values for CPU, GPU, RAM usage, and network throughput over its aggregation window.
+
+### `GetLongRange()`
+
+Reads long-range records from disk and returns the combined history.
+
+```cpp
+std::vector<Telemetry::AggregatedSnapshot> history = collector.GetLongRange();
+```
+
+Records are read from `telemetry_long-1.bin` first, then `telemetry_long.bin`, preserving chronological order across the current and rotated file.
+
+### `GetLastProcessSnapshot()`
+
+Returns the latest process snapshot collected by the worker.
+
+```cpp
+Proc::ProcessSnapshot processes = collector.GetLastProcessSnapshot();
+```
+
+Use this for process tables, process search, or the process logger.
+
+## Aggregated Records
+
+`Telemetry::AggregatedSnapshot` can represent three record types:
+
+| Type | Meaning |
+| --- | --- |
+| `Metric` | A telemetry aggregate for a time window. |
+| `SessionStart` | Marks when the application started a collection session. |
+| `SessionEnd` | Marks when the collection session ended and stores `sessionDurationMs`. |
+
+Metric records include:
+
+- `windowStartMs`, `windowEndMs`
+- `cpuAvg`, `cpuMin`, `cpuMax`
+- `gpuAvg`, `gpuMin`, `gpuMax`
+- `ramPercentAvg`
+- `diskPercentAvg`
+- `ramUsedAvg`, `ramUsedMin`, `ramUsedMax`
+- `netRxAvg`, `netRxMin`, `netRxMax`
+- `netTxAvg`, `netTxMin`, `netTxMax`
+
+## Storage
+
+Long-range telemetry is stored as raw binary `AggregatedSnapshot` records.
+
+Files:
+
+- `telemetry_long.bin`: active long-range file.
+- `telemetry_long-1.bin`: previous rotated file.
+
+Rotation limits:
+
+- Startup rotation: `kLongFileStartupMaxBytes` (`1 MB`).
+- Runtime rotation: `kLongFileRuntimeRotateBytes` (`2 MB`).
+
+During runtime rotation, the collector writes a `SessionEnd`, rotates the file, starts a new session, and then continues writing metrics.
+
+## Thread Safety
+
+The collector uses:
+
+- `std::shared_mutex` for live snapshot reads/writes.
+- `std::mutex` for binary aggregation and long-range file operations.
+- `std::atomic<bool>` to control the worker thread.
+
+The public getters return copies, so callers can safely use the returned values without holding collector locks.
+
+## Minimal Integration Example
+
+```cpp
+#include "collector/collector.h"
+#include "web/web_helper.h"
+#include "func/funk.h"
 
 int main() {
     Telemetry::TelemetryCollector collector("./telemetry_logs");
-    Web::WebTelemetryHelper webHelper(collector);
+    WebTelemetryHelper webHelper(collector);
+    TaskLogger taskLogger(collector);
 
-    auto current = collector.GetLastSnapshot();
+    taskLogger.start();
+
+    auto snapshot = collector.GetLastSnapshot();
     auto live = collector.GetLiveWindow();
+    auto processes = collector.GetLastProcessSnapshot();
+
+    return 0;
 }
 ```
