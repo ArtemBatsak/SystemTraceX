@@ -78,9 +78,10 @@ void AppendMetricPoint(std::ostringstream& ss, const MetricPoint& point) {
 }
 }
 
-Web::Web(WebTelemetryHelper& webHelper_, TaskLogger& taskLogger_)
+Web::Web(WebTelemetryHelper& webHelper_, TaskLogger& taskLogger_, Ping& ping_)
     : webHelper(webHelper_),
-      taskLogger(taskLogger_) {
+      taskLogger(taskLogger_),
+      ping(ping_) {
     svr = std::make_unique<httplib::Server>();
     LoadTrackedProcessesView();
 }

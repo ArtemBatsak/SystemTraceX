@@ -34,6 +34,7 @@ private:
 
     WebTelemetryHelper& webHelper;
     TaskLogger& taskLogger;
+	Ping& ping;
     std::vector<TrackedProcessView> trackedProcesses_;
     std::mutex trackedProcessesMutex_;
     std::unique_ptr<httplib::Server> svr;
