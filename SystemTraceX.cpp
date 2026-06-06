@@ -149,7 +149,8 @@ int WINAPI wWinMain(
     taskLogger.start();
     std::this_thread::sleep_for(
         std::chrono::seconds(2));
-    Web web(webHelper, taskLogger);
+	Ping ping; 
+    Web web(webHelper, taskLogger, ping);
 
     globalWebPtr = &web;
 

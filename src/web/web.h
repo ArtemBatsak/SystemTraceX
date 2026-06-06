@@ -14,7 +14,7 @@
 
 class Web {
 public:
-    Web(WebTelemetryHelper& webHelper_, TaskLogger& taskLogger_);
+    Web(WebTelemetryHelper& webHelper_, TaskLogger& taskLogger_, Ping& ping_);
 
     void Start(const std::string& host = "0.0.0.0", int port = 8080);
     void Stop();

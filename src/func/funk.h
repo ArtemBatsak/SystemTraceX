@@ -12,9 +12,26 @@
 #include <mutex>
 #include <unordered_map>
 
+class Ping {
+public :
+    Ping();
+    ~Ping();
+public:
+	void addhost(const std::string& host);
+    int get_result();
 
-std::vector<int> internetTest(const std::vector<std::string>& hosts);
-int ping(const std::string& host, int port = 443, int timeoutMs = 1000);
+private :
+	struct HostResult {
+		std::string host;
+		int ping = -1;
+	};
+	std::vector<std::string> hosts_list;
+	std::vector<HostResult> ping_results;
+	int ping(const std::string& host, int port = 80, int timeoutMs = 1000);
+	std::atomic <bool> running_;
+	std::thread pingthread;
+    mutable std::mutex data_mutex;
+};
 
 
 struct MetricPoint {

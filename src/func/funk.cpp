@@ -1,4 +1,18 @@
-﻿#include "funk.h"
+﻿#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <chrono>
+#pragma comment(lib, "ws2_32.lib")
+#endif
+#ifdef __linux__
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <chrono>
+#include <string>
+#endif 
+
+#include "funk.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -7,22 +21,59 @@
 #include <sstream>
 #define NOMINMAX
 
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <chrono>
-#pragma comment(lib, "ws2_32.lib")
 
-std::vector<int> internetTest(const std::vector<std::string>& hosts) {
-    std::vector<int> results;
-    for (const auto& host : hosts) {
-        int latency = ping(host);
-        results.push_back(latency);
-    }
-    return results;
+
+
+Ping::Ping() {
+	running_ = true;
+    pingthread = std::thread([this]() {
+        while (running_) {
+            std::vector<std::string> hosts_snapshot;
+            {
+                std::lock_guard<std::mutex> lock(data_mutex);
+                hosts_snapshot = hosts_list;
+            }
+
+            for (size_t i = 0; i < hosts_snapshot.size(); ++i) {
+                if (!running_) break;
+
+                
+                int result = ping(hosts_snapshot[i]);
+
+                {
+                    std::lock_guard<std::mutex> lock(data_mutex);
+
+                    
+                    if (i < ping_results.size()) {
+                        ping_results[i].ping = result;
+                    }
+                }
+            }
+
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        });
 }
 
-int ping(const std::string & host, int port, int timeoutMs)
+Ping::~Ping() {
+	running_ = false;
+	if (pingthread.joinable()) {
+		pingthread.join();
+	}
+}
+
+void Ping::addhost(const std::string& host) {
+    std::lock_guard<std::mutex> lock(data_mutex);
+    hosts_list.push_back(host);
+
+    HostResult new_res;
+    new_res.host = host;
+    new_res.ping = -1; 
+    ping_results.push_back(new_res);
+}
+
+#ifdef _WIN32
+int Ping::ping(const std::string & host, int port, int timeoutMs)
     {
         static bool init = false;
         if (!init)
@@ -71,22 +122,8 @@ int ping(const std::string & host, int port, int timeoutMs)
 #endif
 
 #ifdef __linux__
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-#include <chrono>
-#include <string>
 
-std::vector<int> internetTest(const std::vector<std::string>&hosts) {
-        std::vector<int> results;
-        for (const auto& host : hosts) {
-            int latency = ping(host);
-            results.push_back(latency);
-        }
-        return results;
-    }
-
-int ping(const std::string& host, int port, int timeoutMs)
+int Ping::ping(const std::string& host, int port, int timeoutMs)
     {
         addrinfo hints{};
         hints.ai_family = AF_UNSPEC;

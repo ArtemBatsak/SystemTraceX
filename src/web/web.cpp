@@ -221,10 +221,6 @@ void Web::Start(const std::string& host, int port) {
     svr->Get("/tasks", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(ReadFile("web/taskmanager.html"), "text/html; charset=utf-8");
     });
-    svr->Get("/logs", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_content(ReadFile("web/logs.html"), "text/html; charset=utf-8");
-    });
-
     svr->Get("/script.js", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(ReadFile("web/script.js"), "application/javascript; charset=utf-8");
     });

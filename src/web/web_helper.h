@@ -5,14 +5,13 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include <string> // Добавлено для std::string
+#include <string> 
 
 #include "../collector/collector.h"
 
 class WebTelemetryHelper {
 public:
     explicit WebTelemetryHelper(Telemetry::TelemetryCollector& collector);
-
 
     std::string GetLiveWindowString();
     std::string GetAggregatedWindowString(std::string type);
