@@ -248,7 +248,8 @@ int main() {
     WebTelemetryHelper webHelper(collector);
     TaskLogger taskLogger(collector);
     taskLogger.start();
-    Web web(webHelper, taskLogger);
+    Ping ping;
+    Web web(webHelper, taskLogger, ping);
 
     std::cout << "SystemTraceX started on Linux. Press Ctrl+C to exit..." << std::endl;
 

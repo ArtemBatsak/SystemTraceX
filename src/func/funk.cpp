@@ -1,4 +1,17 @@
-﻿#ifdef _WIN32
+﻿
+
+#include "funk.h"
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <sstream>
+
+
+#define NOMINMAX
+
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <chrono>
@@ -12,20 +25,11 @@
 #include <string>
 #endif 
 
-#include "funk.h"
-#include <algorithm>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <limits>
-#include <sstream>
-#define NOMINMAX
-
-
-
 
 Ping::Ping() {
 	running_ = true;
+	ping_avg = -1;
+	get_hosts(filename);
     pingthread = std::thread([this]() {
         while (running_) {
             std::vector<std::string> hosts_snapshot;
@@ -49,8 +53,16 @@ Ping::Ping() {
                     }
                 }
             }
+            {
+                std::lock_guard<std::mutex> lock(get_mutex);
+                ping_avg = take_ping_result();
+            }
+            {
+                
 
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+
+            std::this_thread::sleep_for(std::chrono::seconds(5));
         }
         });
 }
@@ -60,16 +72,6 @@ Ping::~Ping() {
 	if (pingthread.joinable()) {
 		pingthread.join();
 	}
-}
-
-void Ping::addhost(const std::string& host) {
-    std::lock_guard<std::mutex> lock(data_mutex);
-    hosts_list.push_back(host);
-
-    HostResult new_res;
-    new_res.host = host;
-    new_res.ping = -1; 
-    ping_results.push_back(new_res);
 }
 
 #ifdef _WIN32
@@ -101,7 +103,9 @@ int Ping::ping(const std::string & host, int port, int timeoutMs)
                 continue;
 
             auto start = std::chrono::high_resolution_clock::now();
-
+            DWORD timeout = (DWORD)timeoutMs;
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
             int result = connect(sock, p->ai_addr, (int)p->ai_addrlen);
 
             auto end = std::chrono::high_resolution_clock::now();
@@ -161,6 +165,68 @@ int Ping::ping(const std::string& host, int port, int timeoutMs)
         return ping;
     }
 #endif 
+
+bool Ping::addhost(const std::string& host) { 
+	if (host.size() >=5 ) return false;
+    std::lock_guard<std::mutex> lock(data_mutex);
+    hosts_list.push_back(host);
+    HostResult new_res;
+    new_res.host = host;
+    new_res.ping = -1;
+    ping_results.push_back(new_res);
+	save_hosts(filename);
+	return true;
+}
+bool Ping::removehost(const std::string& host) {
+	std::lock_guard<std::mutex> lock(data_mutex);
+	auto it = std::find(hosts_list.begin(), hosts_list.end(), host);
+	if (it != hosts_list.end()) {
+		size_t index = std::distance(hosts_list.begin(), it);
+		hosts_list.erase(it);
+		ping_results.erase(ping_results.begin() + index);
+		save_hosts(filename);
+		return true;
+	}
+	return false;
+}
+
+int Ping::take_ping_result() {
+	std::lock_guard<std::mutex> lock(data_mutex);
+	int total_ping = 0;
+	int count = 0;
+	for (const auto& res : ping_results) {
+		if (res.ping >= 0) {
+			total_ping += res.ping;
+			count++;
+		}
+	}
+	return count > 0 ? total_ping / count : -1;
+}
+
+void Ping::get_hosts(std::string filename) {
+	std::ifstream file(filename);
+	if (!file.is_open()) {
+        std::ofstream outfile(filename);
+        return;
+	}
+	std::string line;
+	while (std::getline(file, line)) {
+		if (!line.empty()) {
+			addhost(line);
+		}
+	}
+}
+
+void Ping::save_hosts(std::string filename) {
+	std::ofstream file(filename);
+	if (!file.is_open()) {
+		return;
+	}
+	for (const auto& host : hosts_list) {
+		file << host << "\n";
+	}
+}
+
 
 
 

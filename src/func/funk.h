@@ -11,26 +11,34 @@
 #include <fstream>
 #include <mutex>
 #include <unordered_map>
+struct HostResult {
+    std::string host;
+    int ping = -1;
+};
 
 class Ping {
 public :
     Ping();
     ~Ping();
 public:
-	void addhost(const std::string& host);
-    int get_result();
+	bool addhost(const std::string& host);
+	bool removehost(const std::string& host);
+    int get_result(){ std::lock_guard<std::mutex> lock(get_mutex); return ping_avg; };
+    std::vector<HostResult> get_results(){ std::lock_guard<std::mutex> lock(data_mutex); return ping_results; };
 
 private :
-	struct HostResult {
-		std::string host;
-		int ping = -1;
-	};
 	std::vector<std::string> hosts_list;
-	std::vector<HostResult> ping_results;
-	int ping(const std::string& host, int port = 80, int timeoutMs = 1000);
+	int ping(const std::string& host, int port = 80, int timeoutMs = 100);
 	std::atomic <bool> running_;
 	std::thread pingthread;
+	int ping_avg;
+    int take_ping_result();
+	std::vector<HostResult> ping_results;
     mutable std::mutex data_mutex;
+	mutable std::mutex get_mutex;
+    void get_hosts(std::string filename);
+	void save_hosts(std::string filename);
+	std::string filename = "hosts.txt";
 };
 
 
