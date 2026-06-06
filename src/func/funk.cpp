@@ -1,8 +1,12 @@
 ﻿#include "funk.h"
-#include "nlohmann/json.hpp"
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <limits>
+#include <sstream>
+#define NOMINMAX
 
-using json = nlohmann::json;
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -175,12 +179,15 @@ std::vector<MetricPoint> ProcessRing::getAll() const {
 
 TaskLogger::TaskLogger(
     Telemetry::TelemetryCollector& collector,
-    const std::string& saveFile
+    const std::string& saveFile,
+    const std::string& archiveDirectory
 )
     : collector_(collector),
-    saveFile_(saveFile),
-    running_(true)
+      saveFile_(saveFile),
+      archiveDirectory_(archiveDirectory),
+      running_(true)
 {
+    std::filesystem::create_directories(archiveDirectory_);
     loadTrackedProcesses();
 	
 }
@@ -227,6 +234,8 @@ void TaskLogger::removeProcessToTrack(const std::string& path) {
     trackedList_.erase(path);
 
     trackedProcesses_.erase(path);
+
+    archiveWindow_.erase(path);
 }
 
 void TaskLogger::setTrackEnabled(const std::string& path,bool enable) {
@@ -236,6 +245,10 @@ void TaskLogger::setTrackEnabled(const std::string& path,bool enable) {
 
     if (it != trackedList_.end()) {
         it->second.enable = enable;
+
+        if (!enable) {
+            archiveWindow_.erase(path);
+        }
     }
 }
 
@@ -307,6 +320,27 @@ MetricPoint TaskLogger::getLatestProcessPointByName(const std::string& name) con
 
         if (ringIt != trackedProcesses_.end()) {
             return ringIt->second.getLatest();
+        }
+    }
+
+    return {};
+}
+
+std::vector<ArchivePoint> TaskLogger::getProcessArchiveByPath(const std::string& path) const {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    return readArchiveByPath(path);
+}
+
+std::vector<ArchivePoint> TaskLogger::getProcessArchiveByName(const std::string& name) const {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (const auto& pair : trackedList_) {
+
+        if (pair.second.name == name) {
+            return readArchiveByPath(pair.second.path);
         }
     }
 
@@ -391,16 +425,36 @@ void TaskLogger::loadTrackedProcesses() {
 
 void TaskLogger::updateLoop() {
 
+    auto nextTick =
+        std::chrono::steady_clock::now();
+
+    size_t archiveTicks = 0;
+    uint64_t archiveWindowStartMs = 0;
+
     while (running_) {
+
+        const auto tickStart =
+            std::chrono::steady_clock::now();
 
         auto snapshot =
             collector_.GetLastProcessSnapshot();
 
+        if (archiveTicks == 0) {
+            archiveWindowStartMs = snapshot.timestampMs;
+        }
+
         processSnapshot(snapshot);
 
-        std::this_thread::sleep_for(
-            std::chrono::seconds(1)
-        );
+        archiveTicks++;
+
+        if (archiveTicks >= ARCHIVE_WINDOW_SIZE) {
+            flushArchiveWindow(archiveWindowStartMs);
+            archiveTicks = 0;
+            archiveWindowStartMs = 0;
+        }
+
+        nextTick = tickStart + std::chrono::seconds(1);
+        std::this_thread::sleep_until(nextTick);
     }
 }
 
@@ -448,5 +502,181 @@ void TaskLogger::processSnapshot(const Proc::ProcessSnapshot& snapshot) {
         point.instances = instances;
 
         trackedProcesses_[tracked.path].addEntry(point);
+
+        archiveWindow_[tracked.path].push_back(point); 
     }
+}
+
+void TaskLogger::flushArchiveWindow(uint64_t windowStartMs) {
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (auto& pair : archiveWindow_) {
+
+        auto& points = pair.second;
+
+        if (points.empty()) {
+            continue;
+        }
+
+        ArchivePoint archivePoint;
+        archivePoint.timestamp =
+            windowStartMs != 0 ? windowStartMs : points.front().timestamp;
+
+        float cpuMin = std::numeric_limits<float>::max();
+        float cpuMax = std::numeric_limits<float>::lowest();
+        double cpuSum = 0.0;
+
+        uint64_t ramMin = std::numeric_limits<uint64_t>::max();
+        uint64_t ramMax = 0;
+        uint64_t ramSum = 0;
+
+        uint16_t instancesMin = std::numeric_limits<uint16_t>::max();
+        uint16_t instancesMax = 0;
+        uint64_t instancesSum = 0;
+
+        for (const auto& point : points) {
+
+            cpuMin = std::min(cpuMin, point.cpu);
+            cpuMax = std::max(cpuMax, point.cpu);
+            cpuSum += point.cpu;
+
+            ramMin = std::min(ramMin, point.ram);
+            ramMax = std::max(ramMax, point.ram);
+            ramSum += point.ram;
+
+            instancesMin = std::min(instancesMin, point.instances);
+            instancesMax = std::max(instancesMax, point.instances);
+            instancesSum += point.instances;
+        }
+
+        const auto count =
+            static_cast<double>(points.size());
+
+        archivePoint.cpuMin = cpuMin;
+        archivePoint.cpuMax = cpuMax;
+        archivePoint.cpuAvg =
+            static_cast<float>(cpuSum / count);
+
+        archivePoint.ramMin = ramMin;
+        archivePoint.ramMax = ramMax;
+        archivePoint.ramAvg =
+            static_cast<uint64_t>(ramSum / points.size());
+
+        archivePoint.instancesMin = instancesMin;
+        archivePoint.instancesMax = instancesMax;
+        archivePoint.instancesAvg =
+            static_cast<float>(
+                static_cast<double>(instancesSum) / count
+            );
+
+        appendArchivePoint(pair.first, archivePoint);
+        points.clear();
+    }
+}
+
+void TaskLogger::appendArchivePoint(const std::string& path, const ArchivePoint& point) {
+
+    std::filesystem::create_directories(archiveDirectory_);
+
+    const auto filePath =
+        archiveFilePath(path);
+
+    std::error_code ec;
+
+    if (std::filesystem::exists(filePath, ec) && !ec) {
+
+        const auto fileSize =
+            std::filesystem::file_size(filePath, ec);
+        // I don`t want check size of file, i will check count of records
+		// it`s slowly then check size, but file will be not more than ~4.6 mb, so it`s not a problem
+
+        if (!ec &&
+			fileSize / sizeof(ArchivePoint) >= ARCHIVE_MAX_RECORDS) {   
+
+            const auto oldPath =
+                oldArchiveFilePath(path);
+
+            std::filesystem::remove(oldPath, ec);
+            ec.clear();
+
+            std::filesystem::rename(filePath, oldPath, ec);
+        }
+    }
+
+    std::ofstream out(
+        filePath,
+        std::ios::binary | std::ios::app
+    );
+
+    if (!out.is_open()) {
+        return;
+    }
+
+    out.write(
+        reinterpret_cast<const char*>(&point),
+        sizeof(ArchivePoint)
+    );
+}
+
+std::vector<ArchivePoint> TaskLogger::readArchiveByPath(const std::string& path) const {
+
+    std::vector<ArchivePoint> records;
+
+    auto readFile =
+        [&records](const std::string& filePath) {
+
+            std::ifstream in(filePath, std::ios::binary);
+
+            if (!in.is_open()) {
+                return;
+            }
+
+            ArchivePoint point;
+
+            while (in.read(
+                reinterpret_cast<char*>(&point),
+                sizeof(ArchivePoint)
+            )) {
+                records.push_back(point);
+            }
+        };
+
+    readFile(oldArchiveFilePath(path));
+    readFile(archiveFilePath(path));
+
+    return records;
+}
+
+std::string TaskLogger::archiveFilePath(const std::string& path) const {
+
+    uint64_t hash = 1469598103934665603ull;
+
+    for (unsigned char ch : path) {
+        hash ^= ch;
+        hash *= 1099511628211ull;
+    }
+
+    std::ostringstream fileName;
+    fileName
+        << std::hex
+        << std::setw(16)
+        << std::setfill('0')
+        << hash
+        << ".bin";
+
+    return (
+        std::filesystem::path(archiveDirectory_) /
+        fileName.str()
+    ).string();
+}
+
+std::string TaskLogger::oldArchiveFilePath(const std::string& path) const {
+
+    auto filePath =
+        std::filesystem::path(archiveFilePath(path));
+
+    filePath.replace_extension(".old.bin");
+
+    return filePath.string();
 }
